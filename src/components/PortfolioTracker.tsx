@@ -22,6 +22,8 @@ import {
   round2,
 } from '../services/portfolioService';
 import { toCny, symbolCurrency, FX_NOTE } from '../utils/fx';
+import { SmartLedgerImportModal } from './portfolio/SmartLedgerImportModal';
+import { PortfolioStressTestModal } from './portfolio/PortfolioStressTestModal';
 import {
   Wallet,
   Plus,
@@ -36,6 +38,8 @@ import {
   Upload,
   Lock,
   KeyRound,
+  ShieldAlert,
+  Sparkles,
 } from 'lucide-react';
 
 interface PortfolioTrackerProps {
@@ -83,6 +87,8 @@ export const PortfolioTracker: React.FC<PortfolioTrackerProps> = ({ onSelectStoc
   const [quotes, setQuotes] = useState<Record<string, PortfolioQuote>>({});
   const [showAddTx, setShowAddTx] = useState(false);
   const [showAddAccount, setShowAddAccount] = useState(false);
+  const [showSmartImport, setShowSmartImport] = useState(false);
+  const [showStressTest, setShowStressTest] = useState(false);
   const [newAccountName, setNewAccountName] = useState('');
   const [newAccountType, setNewAccountType] = useState<AccountType>('brokerage');
 
@@ -280,7 +286,24 @@ export const PortfolioTracker: React.FC<PortfolioTrackerProps> = ({ onSelectStoc
             <p className="text-xs text-[#576F73] dark:text-[#9BB2B4]">交易流水驱动持仓，成本与盈亏自动重算，数据本地持久化</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setShowStressTest(true)}
+            disabled={holdingRows.length === 0}
+            className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-[#A84A3E]/10 border border-[#A84A3E]/30 text-xs font-semibold text-[#A84A3E] hover:bg-[#A84A3E]/20 disabled:opacity-40 cursor-pointer"
+            title="模拟历史极端黑天鹅危机下的组合抗跌能力与VaR风险暴露"
+          >
+            <ShieldAlert className="w-3.5 h-3.5" />
+            <span>黑天鹅压力测试</span>
+          </button>
+          <button
+            onClick={() => setShowSmartImport(true)}
+            className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-[#3E6F73]/10 border border-[#3E6F73]/30 text-xs font-semibold text-[#3E6F73] dark:text-[#76B4B9] hover:bg-[#3E6F73]/20 cursor-pointer"
+            title="一键粘贴券商持仓或交割单明细文本快速导入"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>智能交割单解析</span>
+          </button>
           <button
             onClick={handleExport}
             className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-white dark:bg-[#1C2426] border border-[#E3E7E1] dark:border-[#2A383A] text-xs font-semibold text-[#1F3437] dark:text-[#E5EBEA] hover:bg-[#ECEFEA] dark:hover:bg-[#253235] cursor-pointer"
@@ -501,6 +524,31 @@ export const PortfolioTracker: React.FC<PortfolioTrackerProps> = ({ onSelectStoc
 
       {/* 记流水弹窗 */}
       {showAddTx && <AddTransactionModal accounts={accounts} onClose={() => setShowAddTx(false)} onSubmit={handleAddTransaction} />}
+
+      {/* 智能交割单解析弹窗 */}
+      {showSmartImport && (
+        <SmartLedgerImportModal
+          accountId={accounts[0]?.id || ''}
+          accountName={accounts[0]?.name || '默认账户'}
+          onClose={() => setShowSmartImport(false)}
+          onImport={(importedTxs) => {
+            setTransactions([...transactions, ...importedTxs]);
+          }}
+        />
+      )}
+
+      {/* 黑天鹅压力测试弹窗 */}
+      {showStressTest && (
+        <PortfolioStressTestModal
+          holdingRows={holdingRows.map((h) => ({
+            ...h,
+            weight: totalAssetsCny > 0 ? (h.marketValueCny / totalAssetsCny) * 100 : 0,
+          }))}
+          totalAssetsCny={totalAssetsCny}
+          totalCashCny={totalCashCny}
+          onClose={() => setShowStressTest(false)}
+        />
+      )}
 
       {/* 添加账户弹窗 */}
       {showAddAccount && (

@@ -2,5 +2,8 @@
   "name": "Zane Invest WORKBENCH",
   "description": "Zane Invest 机构级智能投资工作台：融合五步投研法、Beneish/Altman财务造假排雷量化取证、多情景敏感性估值测算器、买方头寸与止损额风控、个人精准投资决策立项与复盘档案、他人荐股验真机与策略量化回测引擎的专业投资决策系统",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_DEEPSEEK_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_DEEPSEEK_API",
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

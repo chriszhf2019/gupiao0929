@@ -106,8 +106,8 @@ export const TopHoldingsView: React.FC<TopHoldingsViewProps> = ({
         }));
       })
       .catch(() => {});
-    // 公募基金重仓：akshare 数据服务
-    fetch('http://127.0.0.1:8765/api/ak/fund-hold')
+    // 公募基金重仓：Node 服务端
+    fetch('/api/institutional/fund-top10')
       .then((r) => (r.ok ? r.json() : null))
       .then((json: any) => {
         if (!active || !json?.success) return;
@@ -117,8 +117,8 @@ export const TopHoldingsView: React.FC<TopHoldingsViewProps> = ({
         }));
       })
       .catch(() => {});
-    // 社保基金重仓：akshare 数据服务
-    fetch('http://127.0.0.1:8765/api/ak/social-security-hold')
+    // 社保基金重仓：Node 服务端
+    fetch('/api/institutional/social-security-top10')
       .then((r) => (r.ok ? r.json() : null))
       .then((json: any) => {
         if (!active || !json?.success) return;

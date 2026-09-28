@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { StockData } from '../types/stock';
-import { Globe, Layers, Flame, CheckCircle2, AlertTriangle, TrendingUp, Sparkles } from 'lucide-react';
+import { Globe, Layers, Flame, CheckCircle2, AlertTriangle, TrendingUp, Sparkles, Compass, ChevronDown, ChevronUp } from 'lucide-react';
 import { SemanticBadge } from './common/SemanticBadge';
+import { GlobalLiquidityRadar } from './macro/GlobalLiquidityRadar';
 
 interface Step1MacroProps {
   stock: StockData;
@@ -14,6 +15,7 @@ export const Step1Macro: React.FC<Step1MacroProps> = ({
   macroSlider,
   onMacroSliderChange,
 }) => {
+  const [showGlobalRadar, setShowGlobalRadar] = useState(false);
   const getHeatLabel = (score: number) => {
     if (score >= 9)
       return {
@@ -116,7 +118,7 @@ export const Step1Macro: React.FC<Step1MacroProps> = ({
       </div>
 
       {/* 宏观三因子与行业生命周期看板 */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
         {/* 宏观因子解读 */}
         <div className="p-4 rounded-xl bg-[#F6F7F5] dark:bg-[#141A1B] border border-[#E3E7E1] dark:border-[#2A383A] space-y-3">
           <div className="flex items-center justify-between">
@@ -158,6 +160,30 @@ export const Step1Macro: React.FC<Step1MacroProps> = ({
             <span className="font-bold text-[#4A7C6F]">+{stock.macro.industryGrowthRate}% 复合年增</span>
           </div>
         </div>
+      </div>
+
+      {/* 全球流动性雷达与宏观先行指标折叠区 */}
+      <div className="pt-2 border-t border-[#E3E7E1] dark:border-[#2A383A]">
+        <button
+          type="button"
+          onClick={() => setShowGlobalRadar(!showGlobalRadar)}
+          className="w-full flex items-center justify-between p-3 rounded-xl bg-[#F6F7F5] dark:bg-[#141A1B] border border-[#E3E7E1] dark:border-[#2A383A] hover:bg-[#ECEFEA] dark:hover:bg-[#253235] text-xs font-serif font-bold text-[#1F3437] dark:text-[#E5EBEA] transition-colors cursor-pointer"
+        >
+          <div className="flex items-center space-x-2">
+            <Compass className="w-4 h-4 text-[#3E6F73] dark:text-[#76B4B9]" />
+            <span>查看【全球流动性雷达 & 中美利差 / 风险溢价 ERP / 两融杠杆】先行指标看板</span>
+          </div>
+          <div className="flex items-center space-x-1 text-[11px] text-[#3E6F73] dark:text-[#76B4B9]">
+            <span>{showGlobalRadar ? '收起指标' : '展开指标'}</span>
+            {showGlobalRadar ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </div>
+        </button>
+
+        {showGlobalRadar && (
+          <div className="mt-4">
+            <GlobalLiquidityRadar />
+          </div>
+        )}
       </div>
     </div>
   );
