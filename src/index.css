@@ -1,0 +1,112 @@
+@import "tailwindcss";
+
+@theme {
+  /* 品牌与主辅色彩体系（严格遵照规范） */
+  --color-brand-primary: #1F3437; /* 主色：深青灰 */
+  --color-brand-secondary: #3E6F73; /* 辅助色：石青 */
+  --color-bull-green: #4A7C6F; /* 上涨：低饱和苔绿（拒绝刺眼亮绿） */
+  --color-bear-red: #A84A3E; /* 下跌/风险：低饱和赭红（低刺激性） */
+  --color-canvas-light: #F6F7F5; /* 背景：浅米灰 */
+  --color-card-white: #FFFFFF; /* 卡片：白底 */
+
+  /* 字体族定义 */
+  --font-serif: "Noto Serif SC", "Source Han Serif SC", "Source Han Serif", "Songti SC", SimSun, Georgia, serif;
+  --font-sans: "Noto Sans SC", "Source Han Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+/* 全局基底样式与数字等宽优化 */
+:root {
+  --color-bg-base: #F6F7F5;
+  --color-card-base: #FFFFFF;
+  --color-card-hover: #FCFDFB;
+  --color-border-base: #E3E7E1;
+  --color-border-subtle: #ECEFEA;
+  --color-text-main: #1F3437;
+  --color-text-muted: #576F73;
+  --color-text-subtle: #7A9194;
+  
+  --primary: #1F3437;
+  --secondary: #3E6F73;
+  --gain: #4A7C6F;
+  --loss: #A84A3E;
+
+  /* 语义化标识：事实数据、AI研判、不确定性风险 */
+  --tag-fact-bg: #E8EFF0;
+  --tag-fact-text: #1F3437;
+  --tag-fact-border: #CBD9DB;
+
+  --tag-ai-bg: #EAF3F4;
+  --tag-ai-text: #2A5A5E;
+  --tag-ai-border: #B7D9DC;
+
+  --tag-risk-bg: #F8ECE9;
+  --tag-risk-text: #8E362C;
+  --tag-risk-border: #ECC5BE;
+}
+
+/* 深炭灰暗色模式（长时间盯盘专用，低反光无炫光） */
+.theme-dark {
+  --color-bg-base: #141A1B;
+  --color-card-base: #1C2426;
+  --color-card-hover: #222C2F;
+  --color-border-base: #2A383A;
+  --color-border-subtle: #222D2F;
+  --color-text-main: #E5EBEA;
+  --color-text-muted: #9BB2B4;
+  --color-text-subtle: #6F8688;
+
+  --tag-fact-bg: #1B292B;
+  --tag-fact-text: #A8C4C7;
+  --tag-fact-border: #2F474A;
+
+  --tag-ai-bg: #1E3336;
+  --tag-ai-text: #76B4B9;
+  --tag-ai-border: #355A5F;
+
+  --tag-risk-bg: #2D1D1B;
+  --tag-risk-text: #DE867A;
+  --tag-risk-border: #522E29;
+}
+
+body {
+  background-color: var(--color-bg-base);
+  color: var(--color-text-main);
+  font-family: var(--font-sans);
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+/* 标题采用思源宋体，传承古籍与严肃研报质感 */
+h1, h2, h3, .font-serif-title {
+  font-family: var(--font-serif);
+  letter-spacing: -0.015em;
+}
+
+/* 数字、财报、K线指标开启等宽优化，方便对齐阅读 */
+.tabular-numbers, .font-mono, td, .metric-value {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* 典雅低饱和滚动条 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #3E6F7344;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3E6F7388;
+}
