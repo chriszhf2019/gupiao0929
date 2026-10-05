@@ -20,6 +20,7 @@ export class ApiError extends Error {
 }
 
 const DEFAULT_TIMEOUT_MS = 15000;
+const inflightGet = new Map<string, Promise<unknown>>();
 
 function getAccessToken(): string | undefined {
   if (typeof window === 'undefined') {
@@ -32,7 +33,27 @@ function getAccessToken(): string | undefined {
   return import.meta.env.VITE_ACCESS_TOKEN;
 }
 
-export async function request<T>(
+export function request<T>(
+  endpoint: string,
+  options: RequestInit & { timeoutMs?: number } = {}
+): Promise<T> {
+  const method = (options.method || 'GET').toUpperCase();
+  if (method === 'GET') {
+    const existing = inflightGet.get(endpoint);
+    if (existing) return existing as Promise<T>;
+  }
+
+  const pending = executeRequest<T>(endpoint, options);
+  if (method === 'GET') {
+    inflightGet.set(endpoint, pending);
+    pending.finally(() => {
+      if (inflightGet.get(endpoint) === pending) inflightGet.delete(endpoint);
+    });
+  }
+  return pending;
+}
+
+async function executeRequest<T>(
   endpoint: string,
   options: RequestInit & { timeoutMs?: number } = {}
 ): Promise<T> {

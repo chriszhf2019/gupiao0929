@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { request } from '../services/apiClient';
 import { LayoutDashboard, RefreshCw, Sparkles, ArrowUpRight, ArrowDownRight, Activity } from 'lucide-react';
 
@@ -72,9 +72,10 @@ export const MarketDashboardView: React.FC = () => {
   const [review, setReview] = useState<string>();
   const [reviewLoading, setReviewLoading] = useState(false);
   const [reviewError, setReviewError] = useState<string>();
+  const hasMarketData = useRef(false);
 
-  const loadMarket = async () => {
-    setLoading(true);
+  const loadMarket = async (manual = false) => {
+    if (manual || !hasMarketData.current) setLoading(true);
     try {
       const [overview, quick, breadthRes] = await Promise.all([
         request<MarketOverviewResponse>('/api/market-overview'),
@@ -84,6 +85,7 @@ export const MarketDashboardView: React.FC = () => {
       if (overview?.indices) {
         setIndices(overview.indices);
         setUpdatedAt(overview.updatedAt);
+        if (overview.indices.length > 0) hasMarketData.current = true;
       }
       if (quick?.quotes) setQuotes(quick.quotes);
       if (breadthRes?.breadth) setBreadth(breadthRes.breadth);
@@ -97,9 +99,9 @@ export const MarketDashboardView: React.FC = () => {
   };
 
   useEffect(() => {
-    loadMarket();
-    // 每 60 秒自动刷新实时行情（指数/涨跌分布/板块资金流）
-    const timer = setInterval(loadMarket, 60000);
+    loadMarket(false);
+    // 每 60 秒静默刷新，避免整页进入加载态
+    const timer = setInterval(() => loadMarket(false), 60000);
     return () => clearInterval(timer);
   }, []);
 
@@ -139,7 +141,7 @@ export const MarketDashboardView: React.FC = () => {
         <div className="flex items-center gap-2">
           <span className="text-xs text-[#7A9194]">更新于 {formatTime(updatedAt)}</span>
           <button
-            onClick={loadMarket}
+            onClick={() => loadMarket(true)}
             disabled={loading}
             className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-white dark:bg-[#1C2426] border border-[#E3E7E1] dark:border-[#2A383A] text-xs font-semibold text-[#1F3437] dark:text-[#E5EBEA] hover:bg-[#ECEFEA] dark:hover:bg-[#253235] cursor-pointer"
           >

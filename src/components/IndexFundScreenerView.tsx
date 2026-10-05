@@ -44,6 +44,20 @@ interface IndexFundScreenerProps {
   onSelectFundCode?: (code: string) => void;
 }
 
+async function mapWithLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await fn(items[index]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
 export function IndexFundScreenerView({ onSelectFundCode }: IndexFundScreenerProps) {
   // 1. 筛选状态
   const [selectedIndex, setSelectedIndex] = useState<string>('all');
@@ -57,6 +71,7 @@ export function IndexFundScreenerView({ onSelectFundCode }: IndexFundScreenerPro
   // 2. 数据与加载状态
   const [funds, setFunds] = useState<IndexFundItem[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const hasLoadedFunds = React.useRef(false);
   const [selectedFundForDetail, setSelectedFundForDetail] = useState<IndexFundItem | null>(null);
 
   // 3. 实时基金名称/费率校正（来自天天基金，用于发现静态数据的错误映射）
@@ -65,7 +80,7 @@ export function IndexFundScreenerView({ onSelectFundCode }: IndexFundScreenerPro
   useEffect(() => {
     let active = true;
     const codes = PRESET_INDEX_FUNDS.map((f) => f.code).filter((c) => /^\d{6}$/.test(c));
-    Promise.all(codes.map((c) => getFundRealInfo(c)))
+    mapWithLimit(codes, 4, (c) => getFundRealInfo(c))
       .then((results) => {
         if (!active) return;
         const map: Record<string, { name: string; subscriptionFeeRate: number }> = {};
@@ -96,7 +111,7 @@ export function IndexFundScreenerView({ onSelectFundCode }: IndexFundScreenerPro
 
   // 加载基金列表
   const loadFunds = async () => {
-    setIsLoading(true);
+    if (!hasLoadedFunds.current) setIsLoading(true);
     try {
       const res = await getIndexFunds({
         targetIndex: selectedIndex,
@@ -107,6 +122,7 @@ export function IndexFundScreenerView({ onSelectFundCode }: IndexFundScreenerPro
         investmentAmount,
       });
       setFunds(res.funds);
+      hasLoadedFunds.current = true;
       if (res.funds.length > 0 && !selectedFundForDetail) {
         setSelectedFundForDetail(res.funds[0]);
       }

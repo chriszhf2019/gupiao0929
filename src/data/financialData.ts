@@ -1,4 +1,5 @@
 import { StockData, FinancialYear, FundamentalScan } from '../types/stock';
+import { singleflight } from '../utils/singleflight';
 
 const TUSHARE_API = (process.env.TUSHARE_API_URL || 'http://api.tushare.pro').replace(/\/+$/, '');
 const EASTMONEY_API = 'https://datacenter.eastmoney.com/securities/api/data/v1/get';
@@ -124,7 +125,7 @@ async function fetchEastmoneyBalanceSheet(secuCode: string): Promise<Map<string,
   }
 }
 
-async function fetchEastmoneyFinancialYears(secuCode: string): Promise<FinancialYear[] | null> {
+async function fetchEastmoneyIncomeRows(secuCode: string): Promise<EastmoneyFinanceRow[] | null> {
   const query = new URLSearchParams({
     reportName: 'RPT_F10_FINANCE_MAINFINADATA',
     columns: 'ALL',
@@ -151,64 +152,71 @@ async function fetchEastmoneyFinancialYears(secuCode: string): Promise<Financial
     const json = await response.json();
     const rows: EastmoneyFinanceRow[] = json?.result?.data;
     if (!Array.isArray(rows) || rows.length === 0) return null;
-
-    const annualRows = rows
-      .filter((r) => r.REPORT_TYPE === '年报' || String(r.REPORT_DATE || '').includes('12-31'))
-      .sort((a, b) => (String(a.REPORT_DATE) < String(b.REPORT_DATE) ? -1 : 1))
-      .slice(-6);
-
-    const years: FinancialYear[] = [];
-    for (const row of annualRows) {
-      const reportDate = String(row.REPORT_DATE || '').slice(0, 10).replace(/-/g, '');
-      const revenue = Number(row.TOTALOPERATEREVE) || 0;
-      const netProfit = Number(row.PARENTNETPROFIT) || 0;
-      const grossMargin = Number(row.XSMLL) || 0;
-      const netMargin = Number(row.XSJLL) || 0;
-      const roe = Number(row.ROEJQ) || 0;
-      const debtToAsset = Number(row.ZCFZL) || 0;
-      const freeCashFlow = Number(row.NETCASH_OPERATE_PK) || 0;
-
-      if (revenue <= 0 || !reportDate) continue;
-
-      years.push({
-        year: reportDate.slice(0, 4),
-        reportDate,
-        revenue: round2(revenue / 1e8),
-        netProfit: round2(netProfit / 1e8),
-        grossMargin: round1(grossMargin),
-        netMargin: round1(netMargin),
-        roe: round1(roe),
-        debtToAsset: round1(debtToAsset),
-        freeCashFlow: round2(freeCashFlow / 1e8),
-      });
-    }
-
-    if (years.length < 2) return null;
-
-    // 合并真实资产负债表科目（用于 Beneish M-Score / Altman Z-Score 真值化）
-    const balanceMap = await fetchEastmoneyBalanceSheet(secuCode);
-    if (balanceMap.size > 0) {
-      for (const y of years) {
-        const b = y.reportDate ? balanceMap.get(y.reportDate) : undefined;
-        if (b) {
-          y.receivables = b.receivables;
-          y.totalAssets = b.totalAssets;
-          y.currentAssets = b.currentAssets;
-          y.currentLiabilities = b.currentLiabilities;
-          y.fixedAssets = b.fixedAssets;
-          y.totalLiabilities = b.totalLiabilities;
-          y.totalEquity = b.totalEquity;
-          y.retainedEarnings = b.retainedEarnings;
-        }
-      }
-    }
-
-    return years;
+    return rows;
   } catch {
     return null;
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function fetchEastmoneyFinancialYears(secuCode: string): Promise<FinancialYear[] | null> {
+  const [rows, balanceMap] = await Promise.all([
+    fetchEastmoneyIncomeRows(secuCode),
+    fetchEastmoneyBalanceSheet(secuCode),
+  ]);
+  if (!rows) return null;
+
+  const annualRows = rows
+    .filter((r) => r.REPORT_TYPE === '年报' || String(r.REPORT_DATE || '').includes('12-31'))
+    .sort((a, b) => (String(a.REPORT_DATE) < String(b.REPORT_DATE) ? -1 : 1))
+    .slice(-6);
+
+  const years: FinancialYear[] = [];
+  for (const row of annualRows) {
+    const reportDate = String(row.REPORT_DATE || '').slice(0, 10).replace(/-/g, '');
+    const revenue = Number(row.TOTALOPERATEREVE) || 0;
+    const netProfit = Number(row.PARENTNETPROFIT) || 0;
+    const grossMargin = Number(row.XSMLL) || 0;
+    const netMargin = Number(row.XSJLL) || 0;
+    const roe = Number(row.ROEJQ) || 0;
+    const debtToAsset = Number(row.ZCFZL) || 0;
+    const freeCashFlow = Number(row.NETCASH_OPERATE_PK) || 0;
+
+    if (revenue <= 0 || !reportDate) continue;
+
+    years.push({
+      year: reportDate.slice(0, 4),
+      reportDate,
+      revenue: round2(revenue / 1e8),
+      netProfit: round2(netProfit / 1e8),
+      grossMargin: round1(grossMargin),
+      netMargin: round1(netMargin),
+      roe: round1(roe),
+      debtToAsset: round1(debtToAsset),
+      freeCashFlow: round2(freeCashFlow / 1e8),
+    });
+  }
+
+  if (years.length < 2) return null;
+
+  if (balanceMap.size > 0) {
+    for (const y of years) {
+      const b = y.reportDate ? balanceMap.get(y.reportDate) : undefined;
+      if (b) {
+        y.receivables = b.receivables;
+        y.totalAssets = b.totalAssets;
+        y.currentAssets = b.currentAssets;
+        y.currentLiabilities = b.currentLiabilities;
+        y.fixedAssets = b.fixedAssets;
+        y.totalLiabilities = b.totalLiabilities;
+        y.totalEquity = b.totalEquity;
+        y.retainedEarnings = b.retainedEarnings;
+      }
+    }
+  }
+
+  return years;
 }
 
 async function callTushare(
@@ -350,47 +358,84 @@ function buildFundamentalScan(base: StockData, years: FinancialYear[]): Fundamen
   };
 }
 
-export async function enrichWithFinancials(stock: StockData): Promise<StockData> {
+const FIN_OK_TTL_MS = 6 * 60 * 60_000;
+const FIN_MISS_TTL_MS = 60_000;
+
+interface FinSlice {
+  at: number;
+  ttl: number;
+  fundamentals?: FundamentalScan;
+  financialHistory?: FinancialYear[];
+  financialSource?: NonNullable<StockData['financialSource']>;
+}
+
+const finCache = new Map<string, FinSlice>();
+const finInflight = new Map<string, Promise<FinSlice>>();
+
+function applyFinSlice(stock: StockData, slice: FinSlice): StockData {
+  if (!slice.fundamentals || !slice.financialHistory || !slice.financialSource) return stock;
+  return {
+    ...stock,
+    fundamentals: slice.fundamentals,
+    financialHistory: slice.financialHistory,
+    financialSource: slice.financialSource,
+  };
+}
+
+function rememberFinSlice(key: string, slice: FinSlice) {
+  finCache.set(key, slice);
+  if (finCache.size <= 300) return;
+  const oldest = [...finCache.entries()].sort((a, b) => a[1].at - b[1].at);
+  for (const [cacheKey] of oldest.slice(0, finCache.size - 200)) finCache.delete(cacheKey);
+}
+
+async function loadFinancialSlice(stock: StockData): Promise<FinSlice> {
+  const miss = (): FinSlice => ({ at: Date.now(), ttl: FIN_MISS_TTL_MS });
+  const ok = (
+    fundamentals: FundamentalScan,
+    financialHistory: FinancialYear[],
+    financialSource: NonNullable<StockData['financialSource']>
+  ): FinSlice => ({
+    at: Date.now(),
+    ttl: FIN_OK_TTL_MS,
+    fundamentals,
+    financialHistory,
+    financialSource,
+  });
+
   if (process.env.TUSHARE_TOKEN) {
     const tsCode = toTushareCode(stock.symbol);
-    if (!tsCode) {
-      return stock;
-    }
-
+    if (!tsCode) return miss();
     try {
       const years = await fetchFinancialYears(tsCode);
-      if (!years || years.length < 2) {
-        return stock;
-      }
-      return {
-        ...stock,
-        fundamentals: buildFundamentalScan(stock, years),
-        financialHistory: years,
-        financialSource: 'tushare',
-      };
+      if (!years || years.length < 2) return miss();
+      return ok(buildFundamentalScan(stock, years), years, 'tushare');
     } catch (error: any) {
       console.warn('enrichWithFinancials(Tushare) failed, trying Eastmoney:', error?.message || error);
     }
   }
 
   const eastmoneyCode = toEastmoneySecuCode(stock.symbol);
-  if (!eastmoneyCode) {
-    return stock;
-  }
+  if (!eastmoneyCode) return miss();
 
   try {
     const years = await fetchEastmoneyFinancialYears(eastmoneyCode);
-    if (!years || years.length < 2) {
-      return stock;
-    }
-    return {
-      ...stock,
-      fundamentals: buildFundamentalScan(stock, years),
-      financialHistory: years,
-      financialSource: 'eastmoney',
-    };
+    if (!years || years.length < 2) return miss();
+    return ok(buildFundamentalScan(stock, years), years, 'eastmoney');
   } catch (error: any) {
     console.warn('enrichWithFinancials(Eastmoney) failed, using bundled financials:', error?.message || error);
-    return stock;
+    return miss();
   }
+}
+
+export function enrichWithFinancials(stock: StockData): Promise<StockData> {
+  const key = stock.symbol.trim().toUpperCase();
+  const hit = finCache.get(key);
+  if (hit && Date.now() - hit.at < hit.ttl) {
+    return Promise.resolve(applyFinSlice(stock, hit));
+  }
+  return singleflight(finInflight, key, () => loadFinancialSlice(stock)).then((slice) => {
+    rememberFinSlice(key, slice);
+    return applyFinSlice(stock, slice);
+  });
 }

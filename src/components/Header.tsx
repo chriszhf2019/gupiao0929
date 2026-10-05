@@ -10,6 +10,7 @@ import {
   Activity,
   Compass,
   Crosshair,
+  RefreshCw,
   Sun,
   Moon,
   Database,
@@ -38,6 +39,7 @@ interface HeaderProps {
   onSelectView: (view: WorkbenchView) => void;
   theme?: 'light' | 'dark';
   onToggleTheme?: () => void;
+  isStockLoading?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -54,6 +56,7 @@ export const Header: React.FC<HeaderProps> = ({
   onSelectView,
   theme = 'light',
   onToggleTheme,
+  isStockLoading = false,
 }) => {
   const [searchInput, setSearchInput] = React.useState('');
 
@@ -116,7 +119,8 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <span className="font-serif font-bold text-[#1F3437] dark:text-white">{currentStock.name}</span>
               <span className="text-[#576F73] dark:text-[#9BB2B4] font-mono text-[11px]">({currentStock.symbol})</span>
-              <span className="font-mono font-bold text-[#1F3437] dark:text-[#E5EBEA]">
+              <span className="font-mono font-bold text-[#1F3437] dark:text-[#E5EBEA] inline-flex items-center gap-1">
+                {isStockLoading && <RefreshCw className="w-3 h-3 animate-spin text-[#3E6F73]" />}
                 {currentStock.currency === 'USD' ? '$' : '¥'}{currentStock.currentPrice}
               </span>
               <span

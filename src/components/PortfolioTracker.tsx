@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { request } from '../services/apiClient';
+import { stockService } from '../services/stockService';
 import { usePortfolio } from '../context/PortfolioContext';
 import {
   AccountType,
@@ -44,17 +44,6 @@ import {
 
 interface PortfolioTrackerProps {
   onSelectStock: (symbol: string) => void;
-}
-
-interface StockResponse {
-  success: boolean;
-  stock?: {
-    symbol: string;
-    name: string;
-    currentPrice: number;
-    changePercent: number;
-    currency: string;
-  };
 }
 
 interface AddFormState {
@@ -102,21 +91,19 @@ export const PortfolioTracker: React.FC<PortfolioTrackerProps> = ({ onSelectStoc
   useEffect(() => {
     if (status !== 'ready' || activeSymbols.length === 0) return;
     let active = true;
-    Promise.all(
-      activeSymbols.map((symbol) => request<StockResponse>(`/api/stock/${symbol}`, { timeoutMs: 8000 }))
-    )
+    stockService
+      .getQuotes(activeSymbols)
       .then((results) => {
         if (!active) return;
         const map: Record<string, PortfolioQuote> = {};
-        results.forEach((res, idx) => {
-          const s = res?.stock;
-          if (s && Number.isFinite(s.currentPrice)) {
-            map[activeSymbols[idx]] = {
-              symbol: activeSymbols[idx],
-              name: s.name || activeSymbols[idx],
-              currentPrice: s.currentPrice,
-              changePercent: s.changePercent || 0,
-              currency: s.currency || 'CNY',
+        results.forEach((quote) => {
+          if (quote && Number.isFinite(quote.currentPrice) && quote.currentPrice > 0) {
+            map[quote.symbol] = {
+              symbol: quote.symbol,
+              name: quote.name || quote.symbol,
+              currentPrice: quote.currentPrice,
+              changePercent: quote.changePercent || 0,
+              currency: quote.currency || 'CNY',
             };
           }
         });
