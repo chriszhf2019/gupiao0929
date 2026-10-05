@@ -5,16 +5,8 @@ import { Header } from './components/Header';
 import { PresetSelector } from './components/PresetSelector';
 import { StepNavigation } from './components/StepNavigation';
 import { Step1Macro } from './components/Step1Macro';
-import { Step3Fundamentals } from './components/Step3Fundamentals';
 import { Step4Valuation } from './components/Step4Valuation';
-import { Step5Technical } from './components/Step5Technical';
-import { AIDeepReportModal } from './components/AIDeepReportModal';
-import { AIChatDrawer } from './components/AIChatDrawer';
-import { DecisionVerificationModal } from './components/DecisionVerificationModal';
-import { PeerRecommendationValidatorModal } from './components/PeerRecommendationValidatorModal';
-import { PortfolioHealthCheckModal } from './components/PortfolioHealthCheckModal';
 import { SmartRadarModal } from './components/SmartRadarModal';
-import { PersonalDecisionLedgerModal } from './components/PersonalDecisionLedgerModal';
 import { PortfolioProvider } from './context/PortfolioContext';
 import { Sparkles, ArrowRight, RefreshCw, ShieldCheck, Users, Activity, Radio, BookOpenCheck } from 'lucide-react';
 
@@ -43,6 +35,38 @@ const IndexFundScreenerView = lazy(() =>
 const AIStrategyGenerator = lazy(() =>
   import('./components/AIStrategyGenerator').then((m) => ({ default: m.AIStrategyGenerator }))
 );
+const Step3Fundamentals = lazy(() =>
+  import('./components/Step3Fundamentals').then((m) => ({ default: m.Step3Fundamentals }))
+);
+const Step5Technical = lazy(() =>
+  import('./components/Step5Technical').then((m) => ({ default: m.Step5Technical }))
+);
+const AIDeepReportModal = lazy(() =>
+  import('./components/AIDeepReportModal').then((m) => ({ default: m.AIDeepReportModal }))
+);
+const AIChatDrawer = lazy(() =>
+  import('./components/AIChatDrawer').then((m) => ({ default: m.AIChatDrawer }))
+);
+const DecisionVerificationModal = lazy(() =>
+  import('./components/DecisionVerificationModal').then((m) => ({ default: m.DecisionVerificationModal }))
+);
+const PeerRecommendationValidatorModal = lazy(() =>
+  import('./components/PeerRecommendationValidatorModal').then((m) => ({ default: m.PeerRecommendationValidatorModal }))
+);
+const PortfolioHealthCheckModal = lazy(() =>
+  import('./components/PortfolioHealthCheckModal').then((m) => ({ default: m.PortfolioHealthCheckModal }))
+);
+const PersonalDecisionLedgerModal = lazy(() =>
+  import('./components/PersonalDecisionLedgerModal').then((m) => ({ default: m.PersonalDecisionLedgerModal }))
+);
+
+function useMountWhenOpened(open: boolean): boolean {
+  const [mounted, setMounted] = useState(open);
+  useEffect(() => {
+    if (open) setMounted(true);
+  }, [open]);
+  return mounted;
+}
 
 function ViewLoadingFallback() {
   return (
@@ -99,6 +123,12 @@ export default function App() {
   const [isDecisionLedgerOpen, setIsDecisionLedgerOpen] = useState<boolean>(false);
   const [isDecisionLedgerNewTrigger, setIsDecisionLedgerNewTrigger] = useState<boolean>(false);
   const [screenerSymbols, setScreenerSymbols] = useState<string[] | null>(null);
+  const mountAIDeep = useMountWhenOpened(isAIDeepScanOpen);
+  const mountAIChat = useMountWhenOpened(isAIChatOpen);
+  const mountDecision = useMountWhenOpened(isDecisionVerificationOpen);
+  const mountPeer = useMountWhenOpened(isPeerValidatorOpen);
+  const mountHealth = useMountWhenOpened(isPortfolioHealthOpen);
+  const mountLedger = useMountWhenOpened(isDecisionLedgerOpen);
 
   const handleSearchSymbol = (sym: string) => {
     const upper = sym.trim().toUpperCase();
@@ -140,7 +170,19 @@ export default function App() {
         onSelectView={(view) => setCurrentView(view)}
         theme={theme}
         onToggleTheme={toggleTheme}
+        isStockLoading={isStockLoading}
       />
+
+      {isStockLoading && (
+        <div className="h-0.5 bg-[#3E6F73]/15 overflow-hidden" aria-hidden="true">
+          <div className="h-full w-1/3 bg-[#3E6F73] animate-pulse" />
+        </div>
+      )}
+      {stockError && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-3 text-xs text-[#A84A3E]">
+          {stockError}
+        </div>
+      )}
 
       {/* Main Container */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6">
@@ -172,6 +214,7 @@ export default function App() {
 
             {/* Step Views */}
             <div className="space-y-8">
+              <Suspense fallback={<ViewLoadingFallback />}>
               {/* Step 1 & 2: Macro & Industry */}
               {(activeStep === 1 || activeStep === 0) && (
                 <div id="step-1">
@@ -211,6 +254,7 @@ export default function App() {
                   />
                 </div>
               )}
+              </Suspense>
             </div>
 
             {/* Step View Actions */}
@@ -367,61 +411,69 @@ export default function App() {
         </Suspense>
       </main>
 
-      {/* AI Deep Scan Modal */}
-      <AIDeepReportModal
-        isOpen={isAIDeepScanOpen}
-        onClose={() => setIsAIDeepScanOpen(false)}
-        stock={stock}
-        macroSlider={macroSlider}
-      />
+      <Suspense fallback={null}>
+      {mountAIDeep && (
+        <AIDeepReportModal
+          isOpen={isAIDeepScanOpen}
+          onClose={() => setIsAIDeepScanOpen(false)}
+          stock={stock}
+          macroSlider={macroSlider}
+        />
+      )}
 
-      {/* 选股决策可靠性核验弹窗 (三步门禁闭环) */}
-      <DecisionVerificationModal
-        isOpen={isDecisionVerificationOpen}
-        onClose={() => setIsDecisionVerificationOpen(false)}
-        stock={stock}
-      />
+      {mountDecision && (
+        <DecisionVerificationModal
+          isOpen={isDecisionVerificationOpen}
+          onClose={() => setIsDecisionVerificationOpen(false)}
+          stock={stock}
+        />
+      )}
 
-      {/* 他人荐股验真机弹窗 (照妖镜) */}
-      <PeerRecommendationValidatorModal
-        isOpen={isPeerValidatorOpen}
-        onClose={() => setIsPeerValidatorOpen(false)}
-        currentStock={stock}
-        onSelectStock={handleSearchSymbol}
-      />
+      {mountPeer && (
+        <PeerRecommendationValidatorModal
+          isOpen={isPeerValidatorOpen}
+          onClose={() => setIsPeerValidatorOpen(false)}
+          currentStock={stock}
+          onSelectStock={handleSearchSymbol}
+        />
+      )}
 
-      {/* 个人持仓排雷体检器弹窗 (Portfolio Health Detox) */}
-      <PortfolioHealthCheckModal
-        isOpen={isPortfolioHealthOpen}
-        onClose={() => setIsPortfolioHealthOpen(false)}
-        onSelectStock={handleSearchSymbol}
-      />
+      {mountHealth && (
+        <PortfolioHealthCheckModal
+          isOpen={isPortfolioHealthOpen}
+          onClose={() => setIsPortfolioHealthOpen(false)}
+          onSelectStock={handleSearchSymbol}
+        />
+      )}
 
-      {/* 智能风控买点雷达哨兵弹窗 (Smart Alert Radar) */}
+      {mountLedger && (
+        <PersonalDecisionLedgerModal
+          isOpen={isDecisionLedgerOpen}
+          onClose={() => {
+            setIsDecisionLedgerOpen(false);
+            setIsDecisionLedgerNewTrigger(false);
+          }}
+          currentStock={stock}
+          onSelectStock={handleSearchSymbol}
+          initialNewDecision={isDecisionLedgerNewTrigger}
+        />
+      )}
+
+      {mountAIChat && (
+        <AIChatDrawer
+          isOpen={isAIChatOpen}
+          onClose={() => setIsAIChatOpen(false)}
+          stock={stock}
+        />
+      )}
+      </Suspense>
+
+      {/* 哨兵需要在后台持续比价，保持挂载 */}
       <SmartRadarModal
         isOpen={isSmartRadarOpen}
         onClose={() => setIsSmartRadarOpen(false)}
         currentStock={stock}
         onSelectStock={handleSearchSymbol}
-      />
-
-      {/* 个人投资决策与复盘档案系统 (Decision Ledger & Memo) */}
-      <PersonalDecisionLedgerModal
-        isOpen={isDecisionLedgerOpen}
-        onClose={() => {
-          setIsDecisionLedgerOpen(false);
-          setIsDecisionLedgerNewTrigger(false);
-        }}
-        currentStock={stock}
-        onSelectStock={handleSearchSymbol}
-        initialNewDecision={isDecisionLedgerNewTrigger}
-      />
-
-      {/* AI Assistant Floating Chat Drawer */}
-      <AIChatDrawer
-        isOpen={isAIChatOpen}
-        onClose={() => setIsAIChatOpen(false)}
-        stock={stock}
       />
 
       {/* Footer */}

@@ -3,7 +3,7 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { PRESET_STOCKS, generateStockFallback } from "./src/data/presetStocks.js";
-import { getRealtimeStockData, fetchTencentKline } from "./src/data/realtimeQuote.js";
+import { getRealtimeStockData, fetchTencentKline, fetchTencentSnapshotQuotes, parseTencentQuoteBody, type SnapshotQuote } from "./src/data/realtimeQuote.js";
 import { enrichWithFinancials } from "./src/data/financialData.js";
 import { PRESET_INDEX_FUNDS, calculateShareClassCost, ASSET_ALLOCATION_PROFILES } from "./src/data/indexFundData.js";
 import { HOT_SYMBOLS } from "./src/data/hotSymbols.js";
@@ -238,12 +238,7 @@ async function fetchTencentScreenerFallback(): Promise<ScreenerItem[]> {
     const buffer = await response.arrayBuffer();
     const text = new TextDecoder('gbk').decode(buffer);
 
-    const quoteMap = new Map<string, string[]>();
-    const re = /v_(\w+)="([^"]*)";/g;
-    let match: RegExpExecArray | null;
-    while ((match = re.exec(text)) !== null) {
-      quoteMap.set(match[1], match[2].split('~'));
-    }
+    const quoteMap = parseTencentQuoteBody(text);
 
     return TENCENT_SCREENER_FALLBACK.map((s): ScreenerItem | null => {
       const key = `${s.market === 'SH' ? 'sh' : 'sz'}${s.code}`;
@@ -330,6 +325,8 @@ async function fetchMarketScreener(): Promise<ScreenerItem[]> {
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
+// 放在反向代理（Caddy / Nginx / 隧道）后面时，用真实客户端地址做限流。
+app.set("trust proxy", 1);
 
 // 基础安全响应头（生产加固：防 MIME 嗅探 / 点击劫持 / 降低信息泄露）
 app.use((req, res, next) => {
@@ -346,6 +343,10 @@ app.use((req, res, next) => {
 
 // JSON 请求体大小限制（默认 1MB，防超大 payload 拖垮进程）
 app.use(express.json({ limit: "1mb" }));
+
+app.get("/health", (_req, res) => {
+  res.json({ ok: true });
+});
 
 // 生产环境门禁提示：未配置 ACCESS_TOKEN 时给出明确告警
 if (process.env.NODE_ENV === "production" && !process.env.ACCESS_TOKEN) {
@@ -486,8 +487,20 @@ function parseJsonResponse(text: string): any {
 app.get("/api/stock/:symbol", async (req, res) => {
   const symbol = req.params.symbol.trim().toUpperCase();
   try {
-    const stock = await getRealtimeStockData(symbol);
-    const enriched = await enrichWithFinancials(stock);
+    const base = PRESET_STOCKS[symbol] || generateStockFallback(symbol);
+    // 行情与财报互不依赖，并行拉取；财报结果再叠到实时行情上。
+    const [stock, withFin] = await Promise.all([
+      getRealtimeStockData(symbol),
+      enrichWithFinancials(base),
+    ]);
+    const enriched = withFin.financialHistory
+      ? {
+          ...stock,
+          fundamentals: withFin.fundamentals,
+          financialHistory: withFin.financialHistory,
+          financialSource: withFin.financialSource,
+        }
+      : stock;
     res.json({ success: true, stock: enriched, isFallback: !enriched.isRealtime });
   } catch (error: any) {
     console.error("Error fetching stock data, using fallback:", error?.message || error);
@@ -630,31 +643,66 @@ app.get("/api/stock/:symbol/holders", async (req, res) => {
   }
 });
 
-// 常用标杆池实时报价（供顶部快捷切换卡片展示真实价格）
+function withKnownNames(quotes: SnapshotQuote[]): SnapshotQuote[] {
+  const bySymbol = new Map(HOT_SYMBOLS.map((item) => [item.symbol, item.name]));
+  return quotes.map((quote) => {
+    const known = bySymbol.get(quote.symbol);
+    if (!known) return quote;
+    if (quote.isFallback || !quote.name || quote.name === quote.symbol || quote.name.includes('行业标的')) {
+      return { ...quote, name: known };
+    }
+    return quote;
+  });
+}
+
+let quickQuotesCache: { at: number; quotes: SnapshotQuote[] } | null = null;
+let quickQuotesInflight: Promise<SnapshotQuote[]> | null = null;
+const QUICK_QUOTES_TTL_MS = 15_000;
+
+async function loadQuickQuotes(): Promise<SnapshotQuote[]> {
+  const quotes = withKnownNames(await fetchTencentSnapshotQuotes(HOT_SYMBOLS.map((item) => item.symbol)));
+  quickQuotesCache = { at: Date.now(), quotes };
+  return quotes;
+}
+
+// 常用标杆池实时报价：一次腾讯批量行情，而不是每只股票拉 120 日 K 线。
 app.get("/api/quick-quotes", async (req, res) => {
   try {
-    const quotes = await Promise.all(
-      HOT_SYMBOLS.map(async (item) => {
-        try {
-          const stock = await getRealtimeStockData(item.symbol);
-          const fallbackName = String(stock?.name || '').includes('行业标的');
-          return {
-            symbol: item.symbol,
-            name: fallbackName ? item.name : (stock.name || item.name),
-            currentPrice: stock.currentPrice,
-            changePercent: stock.changePercent,
-            currency: stock.currency,
-            isFallback: !stock.isRealtime,
-          };
-        } catch {
-          return { symbol: item.symbol, name: item.name, currentPrice: 0, changePercent: 0, currency: 'CNY', isFallback: true };
-        }
-      })
-    );
-    res.json({ success: true, quotes });
+    if (quickQuotesCache && Date.now() - quickQuotesCache.at < QUICK_QUOTES_TTL_MS) {
+      return res.json({ success: true, quotes: quickQuotesCache.quotes, cached: true });
+    }
+    if (!quickQuotesInflight) {
+      quickQuotesInflight = loadQuickQuotes().finally(() => {
+        quickQuotesInflight = null;
+      });
+    }
+    const quotes = await quickQuotesInflight;
+    res.json({ success: true, quotes, cached: false });
   } catch (error: any) {
     console.error("Error fetching quick quotes:", error);
+    if (quickQuotesCache) {
+      return res.json({ success: true, quotes: quickQuotesCache.quotes, cached: true, stale: true });
+    }
     res.status(500).json({ success: false, error: error.message || "Failed to fetch quick quotes" });
+  }
+});
+
+// 按代码批量取现价（组合盯盘、哨兵比价）。最多 40 只，走同一份快照缓存。
+app.get("/api/quotes", async (req, res) => {
+  const symbols = String(req.query.symbols || "")
+    .split(/[\s,]+/)
+    .map((s) => s.trim().toUpperCase())
+    .filter(Boolean)
+    .slice(0, 40);
+  if (symbols.length === 0) {
+    return res.status(400).json({ success: false, error: "缺少 symbols 参数" });
+  }
+  try {
+    const quotes = await fetchTencentSnapshotQuotes(symbols);
+    res.json({ success: true, quotes });
+  } catch (error: any) {
+    console.error("Error fetching quotes:", error);
+    res.status(500).json({ success: false, error: error.message || "Failed to fetch quotes" });
   }
 });
 
@@ -711,6 +759,7 @@ app.get("/api/kline/:symbol", async (req, res) => {
 
 // 公募基金实时基础信息（名称/申购费率，源：天天基金 pingzhongdata）
 const fundCache = new Map<string, { at: number; data: any }>();
+const fundInflight = new Map<string, Promise<FundBasicInfo>>();
 const FUND_CACHE_TTL_MS = 12 * 60 * 60_000; // 名称/费率低频变动，缓存 12 小时
 
 interface FundBasicInfo {
@@ -718,6 +767,34 @@ interface FundBasicInfo {
   name: string;
   subscriptionFeeRate: number; // 折后申购费率 %
   sourceRate: number; // 原申购费率 %
+}
+
+async function loadFundBasic(code: string): Promise<FundBasicInfo> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const response = await fetch(`https://fund.eastmoney.com/pingzhongdata/${code}.js`, {
+      signal: controller.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://fund.eastmoney.com/' },
+    });
+    if (!response.ok) throw new Error(`fund eastmoney http ${response.status}`);
+    const text = await response.text();
+
+    const nameMatch = text.match(/fS_name\s*=\s*"([^"]+)"/);
+    const sourceRateMatch = text.match(/fund_sourceRate\s*=\s*"([^"]*)"/);
+    const rateMatch = text.match(/fund_Rate\s*=\s*"([^"]*)"/);
+    const name = nameMatch?.[1]?.trim();
+    if (!name) throw new Error('未解析到基金名称');
+
+    return {
+      code,
+      name,
+      subscriptionFeeRate: rateMatch?.[1] ? Number(rateMatch[1]) || 0 : 0,
+      sourceRate: sourceRateMatch?.[1] ? Number(sourceRateMatch[1]) || 0 : 0,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 app.get("/api/fund/:code", async (req, res) => {
@@ -732,29 +809,12 @@ app.get("/api/fund/:code", async (req, res) => {
       return res.json({ success: true, fund: cached.data, cached: true });
     }
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
-    const response = await fetch(`https://fund.eastmoney.com/pingzhongdata/${code}.js`, {
-      signal: controller.signal,
-      headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://fund.eastmoney.com/' },
-    });
-    clearTimeout(timer);
-
-    if (!response.ok) throw new Error(`fund eastmoney http ${response.status}`);
-    const text = await response.text();
-
-    const nameMatch = text.match(/fS_name\s*=\s*"([^"]+)"/);
-    const sourceRateMatch = text.match(/fund_sourceRate\s*=\s*"([^"]*)"/);
-    const rateMatch = text.match(/fund_Rate\s*=\s*"([^"]*)"/);
-    const name = nameMatch?.[1]?.trim();
-    if (!name) throw new Error('未解析到基金名称');
-
-    const fund: FundBasicInfo = {
-      code,
-      name,
-      subscriptionFeeRate: rateMatch?.[1] ? Number(rateMatch[1]) || 0 : 0,
-      sourceRate: sourceRateMatch?.[1] ? Number(sourceRateMatch[1]) || 0 : 0,
-    };
+    let pending = fundInflight.get(code);
+    if (!pending) {
+      pending = loadFundBasic(code).finally(() => fundInflight.delete(code));
+      fundInflight.set(code, pending);
+    }
+    const fund = await pending;
     fundCache.set(code, { at: Date.now(), data: fund });
     res.json({ success: true, fund, cached: false });
   } catch (error: any) {
@@ -915,15 +975,61 @@ app.get(["/api/ak/fund-hold", "/api/ak/fund_hold"], (req, res) => handleInstitut
 app.get(["/api/ak/social-security-hold", "/api/ak/social_security_hold"], (req, res) => handleInstitutionalRoute("social", req, res));
 app.get(["/api/ak/qfii-hold", "/api/ak/qfii_hold"], (req, res) => handleInstitutionalRoute("qfii", req, res));
 
-// 大盘指数概览（真实行情）
+function cachedLoader<T>(ttlMs: number, load: () => Promise<T | null>) {
+  let entry: { at: number; data: T } | null = null;
+  let inflight: Promise<T | null> | null = null;
+  return async (): Promise<{ data: T | null; cached: boolean; stale: boolean }> => {
+    const now = Date.now();
+    if (entry && now - entry.at < ttlMs) {
+      return { data: entry.data, cached: true, stale: false };
+    }
+    if (!inflight) {
+      inflight = load()
+        .then((data) => {
+          if (data != null) entry = { at: Date.now(), data };
+          return data;
+        })
+        .finally(() => {
+          inflight = null;
+        });
+    }
+    try {
+      const data = await inflight;
+      if (data == null && entry) return { data: entry.data, cached: true, stale: true };
+      return { data, cached: false, stale: false };
+    } catch (error) {
+      if (entry) return { data: entry.data, cached: true, stale: true };
+      throw error;
+    }
+  };
+}
+
+const MARKET_CACHE_TTL_MS = 20_000;
+
+const loadMarketOverview = cachedLoader(MARKET_CACHE_TTL_MS, async () => {
+  const indices = await fetchMarketIndexQuotes();
+  if (indices.length === 0) return null;
+  return { updatedAt: new Date().toISOString(), indices };
+});
+
+const loadMarketBreadth = cachedLoader(MARKET_CACHE_TTL_MS, async () => {
+  const [breadth, leaders, fundFlow] = await Promise.all([
+    fetchMarketBreadth(),
+    fetchBoardLeaders(),
+    fetchBoardFundFlow(),
+  ]);
+  if (!breadth && leaders.length === 0 && fundFlow.length === 0) return null;
+  return { updatedAt: new Date().toISOString(), breadth, leaders, fundFlow };
+});
+
+// 大盘指数概览（真实行情，短缓存 + 失败时回退上一份快照）
 app.get("/api/market-overview", async (req, res) => {
   try {
-    const indices = await fetchMarketIndexQuotes();
-    res.json({
-      success: true,
-      updatedAt: new Date().toISOString(),
-      indices,
-    });
+    const result = await loadMarketOverview();
+    if (!result.data) {
+      return res.status(502).json({ success: false, error: "未能获取指数行情" });
+    }
+    res.json({ success: true, ...result.data, cached: result.cached, stale: result.stale });
   } catch (error: any) {
     console.error("Error fetching market overview:", error);
     res.status(500).json({ success: false, error: error.message || "Failed to fetch market overview" });
@@ -933,18 +1039,11 @@ app.get("/api/market-overview", async (req, res) => {
 // 大盘涨跌分布、领涨板块与板块资金流向
 app.get("/api/market-breadth", async (req, res) => {
   try {
-    const [breadth, leaders, fundFlow] = await Promise.all([
-      fetchMarketBreadth(),
-      fetchBoardLeaders(),
-      fetchBoardFundFlow(),
-    ]);
-    res.json({
-      success: true,
-      updatedAt: new Date().toISOString(),
-      breadth,
-      leaders,
-      fundFlow,
-    });
+    const result = await loadMarketBreadth();
+    if (!result.data) {
+      return res.status(502).json({ success: false, error: "未能获取涨跌分布" });
+    }
+    res.json({ success: true, ...result.data, cached: result.cached, stale: result.stale });
   } catch (error: any) {
     console.error("Error fetching market breadth:", error);
     res.status(500).json({ success: false, error: error.message || "Failed to fetch market breadth" });
@@ -953,38 +1052,52 @@ app.get("/api/market-breadth", async (req, res) => {
 
 // 全市场 A 股选股雷达（真实行情快照，供前端按行业/估值/ROE/价格二次筛选）
 let screenerCache: { at: number; items: ScreenerItem[] } | null = null;
+let screenerInflight: Promise<{ items: ScreenerItem[]; stale: boolean } | null> | null = null;
 const SCREENER_CACHE_TTL_MS = 60_000;
+
+async function refreshScreener(): Promise<{ items: ScreenerItem[]; stale: boolean } | null> {
+  let items = await fetchMarketScreener();
+  if (items.length === 0) {
+    items = await fetchTencentScreenerFallback();
+  }
+  if (items.length > 0) {
+    screenerCache = { at: Date.now(), items };
+    return { items, stale: false };
+  }
+  if (screenerCache && screenerCache.items.length > 0) {
+    return { items: screenerCache.items, stale: true };
+  }
+  return null;
+}
 
 app.get("/api/screener", async (req, res) => {
   try {
     const now = Date.now();
-    if (!screenerCache || now - screenerCache.at > SCREENER_CACHE_TTL_MS) {
-      let items = await fetchMarketScreener();
-      if (items.length === 0) {
-        // 东财 clist 偶发限流时，降级到腾讯真实行情备用池，保证选股雷达始终可用。
-        items = await fetchTencentScreenerFallback();
-      }
-      if (items.length === 0) {
-        if (screenerCache && screenerCache.items.length > 0) {
-          // 行情源临时限流时，返回上一次缓存并标记为陈旧数据。
-          return res.json({
-            success: true,
-            updatedAt: new Date(screenerCache.at).toISOString(),
-            total: screenerCache.items.length,
-            items: screenerCache.items,
-            stale: true,
-          });
-        }
-        return res.status(502).json({ success: false, error: "暂时无法获取行情列表，请稍后重试" });
-      }
-      screenerCache = { at: now, items };
+    if (screenerCache && now - screenerCache.at <= SCREENER_CACHE_TTL_MS) {
+      return res.json({
+        success: true,
+        updatedAt: new Date(screenerCache.at).toISOString(),
+        total: screenerCache.items.length,
+        items: screenerCache.items,
+        stale: false,
+      });
     }
+    if (!screenerInflight) {
+      screenerInflight = refreshScreener().finally(() => {
+        screenerInflight = null;
+      });
+    }
+    const refreshed = await screenerInflight;
+    if (!refreshed) {
+      return res.status(502).json({ success: false, error: "暂时无法获取行情列表，请稍后重试" });
+    }
+    const at = screenerCache?.at ?? now;
     res.json({
       success: true,
-      updatedAt: new Date(screenerCache.at).toISOString(),
-      total: screenerCache.items.length,
-      items: screenerCache.items,
-      stale: now - screenerCache.at > SCREENER_CACHE_TTL_MS,
+      updatedAt: new Date(at).toISOString(),
+      total: refreshed.items.length,
+      items: refreshed.items,
+      stale: refreshed.stale,
     });
   } catch (error: any) {
     console.error("Error fetching screener:", error);
@@ -1879,20 +1992,29 @@ app.post("/api/index-funds/ai-diagnosis", aiRateLimit, async (req, res) => {
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, host: "0.0.0.0", allowedHosts: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
+    app.use(express.static(distPath, {
+      index: false,
+      setHeaders(res, filePath) {
+        if (filePath.endsWith(`${path.sep}index.html`)) {
+          res.setHeader("Cache-Control", "no-cache");
+        } else if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+          res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        }
+      },
+    }));
     app.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Stock Analysis Assistant backend running on http://localhost:${PORT}`);
+    console.log(`Stock Analysis Assistant listening on http://0.0.0.0:${PORT}`);
   });
 }
 

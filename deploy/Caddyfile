@@ -1,0 +1,6 @@
+# 公网 HTTPS 入口。域名 A 记录指向本机后：
+#   SITE_ADDRESS=app.example.com PORT=3999 caddy run --config deploy/Caddyfile
+{$SITE_ADDRESS} {
+	encode gzip
+	reverse_proxy 127.0.0.1:{$PORT:3999}
+}

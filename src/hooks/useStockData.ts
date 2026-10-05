@@ -1,7 +1,13 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { StockData } from '../types/stock';
 import { stockService } from '../services/stockService';
 import { PRESET_STOCKS } from '../data/presetStocks';
+
+const stockMemory = new Map<string, StockData>();
+
+function knownStock(symbol: string): StockData | undefined {
+  return stockMemory.get(symbol) || PRESET_STOCKS[symbol];
+}
 
 export interface UseStockDataReturn {
   currentSymbol: string;
@@ -20,22 +26,37 @@ export function useStockData(initialSymbol: string = '600519'): UseStockDataRetu
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [macroSlider, setMacroSlider] = useState<number>(() => stock.macro.macroPolicyHeat || 5);
+  const requestSeq = useRef(0);
+
+  const applyKnown = useCallback((symbolToFetch: string) => {
+    const known = knownStock(symbolToFetch);
+    if (!known) return;
+    setStock(known);
+    if (typeof known.macro?.macroPolicyHeat === 'number') {
+      setMacroSlider(known.macro.macroPolicyHeat);
+    }
+  }, []);
 
   const loadStock = useCallback(async (symbolToFetch: string) => {
+    const seq = ++requestSeq.current;
+    applyKnown(symbolToFetch);
     setIsLoading(true);
     setError(null);
     try {
       const data = await stockService.getStockBySymbol(symbolToFetch);
+      if (seq !== requestSeq.current) return;
+      stockMemory.set(symbolToFetch, data);
       setStock(data);
       if (data.macro && typeof data.macro.macroPolicyHeat === 'number') {
         setMacroSlider(data.macro.macroPolicyHeat);
       }
     } catch (err: any) {
+      if (seq !== requestSeq.current) return;
       setError(err.message || '加载标的数据失败');
     } finally {
-      setIsLoading(false);
+      if (seq === requestSeq.current) setIsLoading(false);
     }
-  }, []);
+  }, [applyKnown]);
 
   useEffect(() => {
     loadStock(currentSymbol);
@@ -44,9 +65,10 @@ export function useStockData(initialSymbol: string = '600519'): UseStockDataRetu
   const selectSymbol = useCallback((sym: string) => {
     const clean = sym.trim().toUpperCase();
     if (clean && clean !== currentSymbol) {
+      applyKnown(clean);
       setCurrentSymbol(clean);
     }
-  }, [currentSymbol]);
+  }, [currentSymbol, applyKnown]);
 
   const reload = useCallback(async () => {
     await loadStock(currentSymbol);

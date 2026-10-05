@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { request } from '../services/apiClient';
 import { BatchBacktestPanel } from './BatchBacktestPanel';
 import {
@@ -97,30 +97,33 @@ export const StockScreenerView: React.FC<StockScreenerViewProps> = ({ currentSym
   const [page, setPage] = useState(1);
   const [showFilters, setShowFilters] = useState(false);
   const [excludeSt, setExcludeSt] = useState(true);
+  const hasItems = useRef(false);
 
-  const load = async () => {
-    setLoading(true);
-    setError(null);
+  const load = async (manual = false) => {
+    if (manual || !hasItems.current) setLoading(true);
+    if (manual) setError(null);
     try {
       const res = await request<ScreenerResponse>('/api/screener', { timeoutMs: 15000 });
       if (res?.items && res.items.length > 0) {
         setItems(res.items);
         setUpdatedAt(res.updatedAt);
         setStale(Boolean(res.stale));
-      } else {
+        hasItems.current = true;
+        setError(null);
+      } else if (!hasItems.current) {
         setError(res?.error || '未获取到行情数据，请稍后重试');
       }
     } catch (err: any) {
-      setError(err?.message || '加载失败，请稍后重试');
+      if (!hasItems.current || manual) setError(err?.message || '加载失败，请稍后重试');
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    load();
-    // 每 60 秒自动刷新全市场快照（服务端已做 60s 缓存，不会刷爆行情源）
-    const timer = setInterval(load, 60000);
+    load(false);
+    // 每 60 秒静默刷新全市场快照（服务端已做 60s 缓存，不会刷爆行情源）
+    const timer = setInterval(() => load(false), 60000);
     return () => clearInterval(timer);
   }, []);
 
@@ -320,7 +323,7 @@ export const StockScreenerView: React.FC<StockScreenerViewProps> = ({ currentSym
             <span>导出 CSV</span>
           </button>
           <button
-            onClick={load}
+            onClick={() => load(true)}
             disabled={loading}
             className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-[#1F3437] hover:bg-[#274246] text-white text-xs font-semibold shadow-sm cursor-pointer disabled:opacity-60"
           >
@@ -411,7 +414,7 @@ export const StockScreenerView: React.FC<StockScreenerViewProps> = ({ currentSym
         ) : error ? (
           <div className="text-center py-16">
             <p className="text-sm text-[#A84A3E] mb-3">{error}</p>
-            <button onClick={load} className="px-4 py-2 rounded-xl bg-[#1F3437] text-white text-xs font-semibold cursor-pointer">重新加载</button>
+            <button onClick={() => load(true)} className="px-4 py-2 rounded-xl bg-[#1F3437] text-white text-xs font-semibold cursor-pointer">重新加载</button>
           </div>
         ) : (
           <>

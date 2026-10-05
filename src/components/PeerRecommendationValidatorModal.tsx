@@ -139,15 +139,20 @@ export const PeerRecommendationValidatorModal: React.FC<PeerRecommendationValida
   useEffect(() => {
     if (!isOpen || activeTab !== 'history' || historyRecords.length === 0) return;
     let active = true;
-    historyRecords.forEach(async (item) => {
-      try {
-        const s = await stockService.getStockBySymbol(item.symbol);
-        if (active && s.currentPrice > 0) {
-          setPriceMap((prev) => ({ ...prev, [item.symbol]: s.currentPrice }));
-        }
-      } catch {
-        // 忽略单只失败
+    const symbols = historyRecords.map((item) => item.symbol);
+    stockService.getQuotes(symbols).then((quotes) => {
+      if (!active) return;
+      const bySymbol = new Map(quotes.map((quote) => [quote.symbol, quote.currentPrice]));
+      const next: Record<string, number> = {};
+      historyRecords.forEach((item) => {
+        const price = bySymbol.get(item.symbol.trim().toUpperCase());
+        if (price && price > 0) next[item.symbol] = price;
+      });
+      if (Object.keys(next).length > 0) {
+        setPriceMap((prev) => ({ ...prev, ...next }));
       }
+    }).catch(() => {
+      // 批量报价失败时保留已有价格
     });
     return () => {
       active = false;

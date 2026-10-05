@@ -110,13 +110,15 @@ export const SmartRadarModal: React.FC<SmartRadarModalProps> = ({
       setChecking(true);
       const monitorSymbols: string[] = Array.from(new Set(rulesRef.current.map((r) => r.symbol)));
       const prices: Record<string, number> = {};
-      for (const sym of monitorSymbols) {
-        try {
-          const s = await stockService.getStockBySymbol(sym);
-          prices[sym] = s.currentPrice;
-        } catch {
-          // 单只拉取失败跳过
-        }
+      try {
+        const quotes = await stockService.getQuotes(monitorSymbols);
+        const bySymbol = new Map(quotes.map((quote) => [quote.symbol, quote.currentPrice]));
+        monitorSymbols.forEach((sym) => {
+          const price = bySymbol.get(sym.trim().toUpperCase());
+          if (price && price > 0) prices[sym] = price;
+        });
+      } catch {
+        // 批量报价失败时保留上一轮价格
       }
       if (!active) return;
       setPriceMap((prev) => ({ ...prev, ...prices }));

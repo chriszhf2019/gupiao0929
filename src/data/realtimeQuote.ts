@@ -1,5 +1,6 @@
 import { StockData, PricePoint } from '../types/stock';
 import { PRESET_STOCKS, generateStockFallback } from './presetStocks';
+import { singleflight } from '../utils/singleflight';
 
 interface NormalizedSymbol {
   market: 'A-Share' | 'HK-Share' | 'US-Share';
@@ -34,6 +35,8 @@ interface TencentQuote {
 const ENABLE_REALTIME = process.env.ENABLE_REALTIME_QUOTES !== 'false';
 const CACHE_TTL_MS = 15_000;
 const cache = new Map<string, { at: number; stock: StockData }>();
+const quoteInflight = new Map<string, Promise<StockData>>();
+const TENCENT_BATCH_QUOTE_API = 'https://qt.gtimg.cn/q=';
 
 function num(n: number): number {
   return Number.isFinite(n) ? n : 0;
@@ -284,8 +287,7 @@ function mergeQuoteIntoStock(
   };
 }
 
-export async function getRealtimeStockData(symbol: string): Promise<StockData> {
-  const raw = symbol.trim().toUpperCase();
+async function loadRealtimeStock(raw: string): Promise<StockData> {
   const base = PRESET_STOCKS[raw] || generateStockFallback(raw);
 
   if (!ENABLE_REALTIME) {
@@ -297,11 +299,6 @@ export async function getRealtimeStockData(symbol: string): Promise<StockData> {
     return base;
   }
 
-  const cached = cache.get(raw);
-  if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
-    return cached.stock;
-  }
-
   const fetched = await fetchTencentKline(normalized.tencentSymbol, 120);
   if (!fetched) {
     return base;
@@ -310,4 +307,137 @@ export async function getRealtimeStockData(symbol: string): Promise<StockData> {
   const stock = mergeQuoteIntoStock(base, normalized, fetched.bars, fetched.quote);
   cache.set(raw, { at: Date.now(), stock });
   return stock;
+}
+
+export function getRealtimeStockData(symbol: string): Promise<StockData> {
+  const raw = symbol.trim().toUpperCase();
+  const cached = cache.get(raw);
+  if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
+    return Promise.resolve(cached.stock);
+  }
+  return singleflight(quoteInflight, raw, () => loadRealtimeStock(raw));
+}
+
+export interface SnapshotQuote {
+  symbol: string;
+  name: string;
+  currentPrice: number;
+  changePercent: number;
+  currency: string;
+  isFallback: boolean;
+}
+
+export function parseTencentQuoteBody(text: string): Map<string, string[]> {
+  const quoteMap = new Map<string, string[]>();
+  const re = /v_(\w+)="([^"]*)";/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text)) !== null) {
+    quoteMap.set(match[1].toLowerCase(), match[2].split('~'));
+  }
+  return quoteMap;
+}
+
+export function quoteFromTencentFields(symbol: string, fields: string[]): SnapshotQuote | null {
+  if (!fields || fields.length < 33) return null;
+  const price = Number(fields[3]);
+  if (!Number.isFinite(price) || price <= 0) return null;
+  const raw = symbol.trim().toUpperCase();
+  const ns = normalizeTencentSymbol(raw);
+  const preset = PRESET_STOCKS[raw];
+  const name = String(fields[1] || '').replace(/\s+/g, '') || preset?.name || raw;
+  return {
+    symbol: raw,
+    name,
+    currentPrice: round2(price),
+    changePercent: round2(Number(fields[32]) || 0),
+    currency: ns?.currency || preset?.currency || 'CNY',
+    isFallback: false,
+  };
+}
+
+function fallbackSnapshot(symbol: string): SnapshotQuote {
+  const raw = symbol.trim().toUpperCase();
+  const preset = PRESET_STOCKS[raw];
+  const ns = normalizeTencentSymbol(raw);
+  return {
+    symbol: raw,
+    name: preset?.name || raw,
+    currentPrice: preset?.currentPrice || 0,
+    changePercent: preset?.changePercent || 0,
+    currency: ns?.currency || preset?.currency || 'CNY',
+    isFallback: true,
+  };
+}
+
+const snapshotCache = new Map<string, { at: number; quote: SnapshotQuote }>();
+const SNAPSHOT_TTL_MS = 15_000;
+const snapshotInflight = new Map<string, Promise<void>>();
+
+function pruneSnapshotCache() {
+  if (snapshotCache.size <= 500) return;
+  const oldest = [...snapshotCache.entries()].sort((a, b) => a[1].at - b[1].at);
+  for (const [key] of oldest.slice(0, snapshotCache.size - 300)) snapshotCache.delete(key);
+}
+
+export async function fetchTencentSnapshotQuotes(symbols: string[]): Promise<SnapshotQuote[]> {
+  const unique = [...new Set(symbols.map((s) => s.trim().toUpperCase()).filter(Boolean))].slice(0, 40);
+  const now = Date.now();
+  const out = new Map<string, SnapshotQuote>();
+  const missing: { raw: string; tencent: string }[] = [];
+
+  for (const raw of unique) {
+    const hit = snapshotCache.get(raw);
+    if (hit && now - hit.at < SNAPSHOT_TTL_MS) {
+      out.set(raw, hit.quote);
+      continue;
+    }
+    const ns = normalizeTencentSymbol(raw);
+    if (!ns || ns.market === 'US-Share') {
+      const fallback = fallbackSnapshot(raw);
+      snapshotCache.set(raw, { at: now, quote: fallback });
+      out.set(raw, fallback);
+      continue;
+    }
+    missing.push({ raw, tencent: ns.tencentSymbol });
+  }
+
+  if (missing.length > 0) {
+    const flightKey = missing.map((item) => item.tencent).sort().join(',');
+    await singleflight(snapshotInflight, flightKey, async () => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 6000);
+      try {
+        const response = await fetch(`${TENCENT_BATCH_QUOTE_API}${missing.map((item) => item.tencent).join(',')}`, {
+          signal: controller.signal,
+          headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://gu.qq.com/' },
+        });
+        if (!response.ok) throw new Error(`tencent http ${response.status}`);
+        const buffer = await response.arrayBuffer();
+        const text = new TextDecoder('gbk').decode(buffer);
+        const parsed = parseTencentQuoteBody(text);
+        const stamped = Date.now();
+        for (const item of missing) {
+          const fields = parsed.get(item.tencent.toLowerCase());
+          const quote = fields ? quoteFromTencentFields(item.raw, fields) : null;
+          snapshotCache.set(item.raw, { at: stamped, quote: quote || fallbackSnapshot(item.raw) });
+        }
+      } catch {
+        const stamped = Date.now();
+        for (const item of missing) {
+          if (!snapshotCache.has(item.raw)) {
+            snapshotCache.set(item.raw, { at: stamped, quote: fallbackSnapshot(item.raw) });
+          }
+        }
+      } finally {
+        clearTimeout(timer);
+      }
+    });
+
+    for (const item of missing) {
+      out.set(item.raw, snapshotCache.get(item.raw)?.quote || fallbackSnapshot(item.raw));
+    }
+  }
+
+  pruneSnapshotCache();
+  return unique.map((symbol) => out.get(symbol) || fallbackSnapshot(symbol));
 }

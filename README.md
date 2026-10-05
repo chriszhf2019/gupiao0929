@@ -52,14 +52,21 @@ npm run dev                # 默认 http://localhost:3999
 
 > 端口冲突时改 `.env` 里的 `PORT`。本地 3000/3100 常被占用，默认已改为 3999。
 
-### 4. 生产部署
+### 4. 公网访问
+应用监听 `0.0.0.0`。云服务器安全组或防火墙放行端口后，公网即可打开。
+
 ```bash
-npm run build              # 产出 dist/（前端静态 + server.cjs）
-NODE_ENV=production PORT=3999 npm start
+npm run build
+npm run start:public       # 默认 http://0.0.0.0:3999
 ```
-公网部署**务必**：
-- 设置 `ACCESS_TOKEN` + `VITE_ACCESS_TOKEN`（所有 /api 需 Bearer 令牌）
-- 用 Nginx/HTTPS 反向代理，或至少置于内网
+
+有域名时用 Caddy 自动申请 HTTPS 证书（域名 A 记录指向这台机器）：
+
+```bash
+SITE_ADDRESS=app.example.com PORT=3999 caddy run --config deploy/Caddyfile
+```
+
+不设置 `ACCESS_TOKEN` 时，打开网页就能用，`/api` 对访客开放，AI 接口仍有每分钟限流。若要挡住未打开页面的直接调用，在**构建前**把同一个随机串写入 `ACCESS_TOKEN` 和 `VITE_ACCESS_TOKEN`。只在启动时设置令牌，浏览器请求会全部 401。
 
 ---
 

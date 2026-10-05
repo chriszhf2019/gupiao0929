@@ -1,6 +1,6 @@
 import { IndexFundItem, CostSimulationResult, AssetAllocationRecommendation } from '../types/indexFund';
 import { PRESET_INDEX_FUNDS, calculateShareClassCost, ASSET_ALLOCATION_PROFILES } from '../data/indexFundData';
-import { request, ApiError } from './apiClient';
+import { request } from './apiClient';
 
 export interface IndexFundFilterOptions {
   targetIndex?: string;
@@ -36,59 +36,44 @@ export async function getIndexFunds(options: IndexFundFilterOptions = {}): Promi
     investmentAmount = 50000,
   } = options;
 
-  try {
-    const query = new URLSearchParams({
-      index: targetIndex,
-      minAssets: String(minAssets),
-      maxTrackingError: String(maxTrackingError),
-      holdingDays: String(holdingDays),
-      quotaOnly: String(quotaOnly),
-      amount: String(investmentAmount),
-    });
+  // 基金池已随前端打包，筛选和费用测算直接在本地完成，拖动滑块不再打接口。
+  let list = [...PRESET_INDEX_FUNDS];
+  if (targetIndex !== 'all') {
+    list = list.filter((f) => f.targetIndex.toLowerCase() === targetIndex.toLowerCase());
+  }
 
-    const response = await request<IndexFundApiResponse>(`/api/index-funds?${query.toString()}`);
-    return response;
-  } catch (err) {
-    console.warn('Index funds API failed, using client-side calculation fallback:', err);
-    // Local fallback calculation
-    let list = [...PRESET_INDEX_FUNDS];
-    if (targetIndex !== 'all') {
-      list = list.filter((f) => f.targetIndex.toLowerCase() === targetIndex.toLowerCase());
-    }
-
-    const processed = list.map((fund) => {
-      const quotaPass = fund.quotaStatus !== 'suspended';
-      const sizePass = fund.fundSize >= minAssets;
-      const trackingPass = fund.trackingError <= maxTrackingError;
-      const costSim = calculateShareClassCost(fund, investmentAmount, holdingDays);
-
-      return {
-        ...fund,
-        screenPass: quotaPass && sizePass && trackingPass,
-        criteriaCheck: {
-          quotaPass,
-          sizePass,
-          trackingPass,
-        },
-        costSimulation: costSim,
-      };
-    });
-
-    let filtered = processed;
-    if (quotaOnly) {
-      filtered = filtered.filter((f) => f.criteriaCheck.quotaPass);
-    }
-    filtered = filtered.filter((f) => f.fundSize >= minAssets && f.trackingError <= maxTrackingError);
-    filtered.sort((a, b) => a.totalExpenseRatio - b.totalExpenseRatio);
+  const processed = list.map((fund) => {
+    const quotaPass = fund.quotaStatus !== 'suspended';
+    const sizePass = fund.fundSize >= minAssets;
+    const trackingPass = fund.trackingError <= maxTrackingError;
+    const costSim = calculateShareClassCost(fund, investmentAmount, holdingDays);
 
     return {
-      success: true,
-      totalCount: PRESET_INDEX_FUNDS.length,
-      matchedCount: filtered.length,
-      funds: filtered,
-      allFunds: processed,
+      ...fund,
+      screenPass: quotaPass && sizePass && trackingPass,
+      criteriaCheck: {
+        quotaPass,
+        sizePass,
+        trackingPass,
+      },
+      costSimulation: costSim,
     };
+  });
+
+  let filtered = processed;
+  if (quotaOnly) {
+    filtered = filtered.filter((f) => f.criteriaCheck.quotaPass);
   }
+  filtered = filtered.filter((f) => f.fundSize >= minAssets && f.trackingError <= maxTrackingError);
+  filtered.sort((a, b) => a.totalExpenseRatio - b.totalExpenseRatio);
+
+  return {
+    success: true,
+    totalCount: PRESET_INDEX_FUNDS.length,
+    matchedCount: filtered.length,
+    funds: filtered,
+    allFunds: processed,
+  };
 }
 
 export interface FundRealInfo {
