@@ -325,6 +325,8 @@ async function fetchMarketScreener(): Promise<ScreenerItem[]> {
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
+// 放在反向代理（Caddy / Nginx / 隧道）后面时，用真实客户端地址做限流。
+app.set("trust proxy", 1);
 
 // 基础安全响应头（生产加固：防 MIME 嗅探 / 点击劫持 / 降低信息泄露）
 app.use((req, res, next) => {
@@ -341,6 +343,10 @@ app.use((req, res, next) => {
 
 // JSON 请求体大小限制（默认 1MB，防超大 payload 拖垮进程）
 app.use(express.json({ limit: "1mb" }));
+
+app.get("/health", (_req, res) => {
+  res.json({ ok: true });
+});
 
 // 生产环境门禁提示：未配置 ACCESS_TOKEN 时给出明确告警
 if (process.env.NODE_ENV === "production" && !process.env.ACCESS_TOKEN) {
@@ -1986,7 +1992,7 @@ app.post("/api/index-funds/ai-diagnosis", aiRateLimit, async (req, res) => {
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, host: "0.0.0.0", allowedHosts: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
@@ -2008,7 +2014,7 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Stock Analysis Assistant backend running on http://localhost:${PORT}`);
+    console.log(`Stock Analysis Assistant listening on http://0.0.0.0:${PORT}`);
   });
 }
 
