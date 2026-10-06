@@ -1,4 +1,5 @@
 import { StockData, ReliabilityAuditReport, StockAnalysisArchetype, DecisionGateCheckItem } from '../types/stock';
+import { isFinancialSector, resolveFundamentalThresholds } from './fundamentalProfile';
 
 /**
  * 针对标的执行「选股可靠性三步法决策审计」
@@ -34,57 +35,84 @@ export function auditStockReliability(
   // 2. Gate 1: 排雷一票否决指标检查
   const items: DecisionGateCheckItem[] = [];
 
-  // 指标 1: 经营现金流 vs 净利润
-  const cashVsProfitRatio = lastYear?.netProfit && lastYear.netProfit > 0
-    ? (lastYear.freeCashFlow / lastYear.netProfit)
-    : 1.1;
-  const isCashFlowOk = cashVsProfitRatio >= 0.8 || f.cashFlowPass;
-  
+  const thresholds = resolveFundamentalThresholds(stock, archetype);
+  const financial = isFinancialSector(stock);
+
+  // 指标 1: 经营现金流 vs 净利润。亏损时比值无意义，不能默认通过。
+  const profit = lastYear?.netProfit;
+  const operatingCash = lastYear?.freeCashFlow;
+  let cashVsProfitRatio: number | null = null;
+  let cashDisplay = '缺少最近一期净利润';
+  let isCashFlowOk = false;
+  if (profit == null || operatingCash == null) {
+    cashDisplay = '缺少最近一期财报';
+  } else if (profit <= 0) {
+    cashDisplay = `净利润 ${profit} 亿，亏损期无法计算现金流/净利润`;
+  } else {
+    cashVsProfitRatio = operatingCash / profit;
+    isCashFlowOk = cashVsProfitRatio >= 0.8;
+    cashDisplay = `${(cashVsProfitRatio * 100).toFixed(0)}%（经营现金流 ${operatingCash} 亿）`;
+  }
+  const cashSeverity: DecisionGateCheckItem['severity'] = archetype === 'cyclical_recovery' && profit != null && profit <= 0
+    ? 'high'
+    : 'critical';
+
   items.push({
     id: 'gate1_cash_flow',
     category: 'gate1_anti_fraud',
     name: '经营现金流与净利润匹配度',
-    criterion: '经营现金流/净利润 ≥ 80% (纸面富贵一票否决)',
-    currentValueDisplay: `${(cashVsProfitRatio * 100).toFixed(0)}% (最近一期现金流: ${lastYear?.freeCashFlow || 0}亿)`,
+    criterion: '经营现金流/净利润 ≥ 80%；净利润 ≤ 0 时记为无法计算',
+    currentValueDisplay: cashDisplay,
     isPassed: isCashFlowOk,
-    severity: 'critical',
+    severity: cashSeverity,
     explanation: isCashFlowOk
-      ? '净利润具备高比例真实真金白银现金流支撑，不存在应收账款恶性粉饰。'
-      : '净利润含金量严重偏低，大量利润停留在应收账款或虚增存货中，存在造假与坏账暴雷隐患！',
-    actionIfFailed: '禁止重仓！若连续两年现金流为负且利润为正，必须直接剔除。',
+      ? '净利润有相应经营现金流支撑。口径是经营活动现金流，不是自由现金流。'
+      : profit != null && profit <= 0
+      ? '公司处于亏损，现金流/净利润这个比值没有意义，不能当成通过。'
+      : '经营现金流明显低于净利润，利润里可能有较多应收或应计项目。',
+    actionIfFailed: '利润不为正或含金量不足时，不要按“匹配度 110%”放行。',
   });
 
-  // 指标 2: 资产负债率红线
-  const maxDebtLimit = archetype === 'growth_innovator' ? 65 : 60;
-  const isDebtOk = f.debtRatioValue <= maxDebtLimit;
+  // 指标 2: 资产负债率。金融业不使用 60% 红线。
+  const isDebtOk = thresholds.debtRatioMax == null || f.debtRatioValue <= thresholds.debtRatioMax;
   items.push({
     id: 'gate1_debt_ratio',
     category: 'gate1_anti_fraud',
-    name: '资产负债率与偿债安全垫',
-    criterion: `资产负债率 ≤ ${maxDebtLimit}% (非金融行业)`,
-    currentValueDisplay: `${f.debtRatioValue.toFixed(1)}%`,
+    name: financial ? '资产负债率（金融业不适用）' : '资产负债率与偿债安全垫',
+    criterion: thresholds.debtRatioMax == null
+      ? '银行/保险/证券不适用资产负债率红线'
+      : `资产负债率 ≤ ${thresholds.debtRatioMax}%`,
+    currentValueDisplay: financial
+      ? `${f.debtRatioValue.toFixed(1)}%（不计入否决）`
+      : `${f.debtRatioValue.toFixed(1)}%`,
     isPassed: isDebtOk,
     severity: 'high',
-    explanation: isDebtOk
-      ? '负债水平处于安全可控区间，利息支出与短期偿债压力小。'
-      : '负债率偏高，在流动性紧缩或宏观下行期易引发资金链断裂风险。',
-    actionIfFailed: '若有息负债率持续上升，降低预期仓位至 5% 以下。',
+    explanation: financial
+      ? '金融企业负债率天然高于工商企业。这里不设 60% 红线，请另看不良率、偿付能力或资本充足率。'
+      : isDebtOk
+      ? '负债水平处于当前原型的阈值以内。'
+      : '负债率高于当前原型的阈值。',
+    actionIfFailed: financial
+      ? '改查资本充足率、不良率和拨备，而不是用工商企业的负债率否决。'
+      : '若有息负债率持续上升，降低预期仓位。',
   });
 
-  // 指标 3: 盈利能力韧性 (毛利率)
-  const isGrossMarginOk = f.grossMarginPass || f.grossMarginValue >= 25;
+  // 指标 3: 毛利率。金融业不适用。
+  const isGrossMarginOk = thresholds.grossMarginMin == null || f.grossMarginValue >= thresholds.grossMarginMin;
   items.push({
     id: 'gate1_gross_margin',
     category: 'gate1_anti_fraud',
-    name: '产品毛利率与定价权护城河',
-    criterion: '毛利率 ≥ 25% (具备抗通胀转嫁成本能力)',
-    currentValueDisplay: `${f.grossMarginValue.toFixed(1)}%`,
+    name: financial ? '毛利率（金融业不适用）' : '产品毛利率与定价权',
+    criterion: thresholds.grossMarginMin == null ? '金融业不适用毛利率红线' : `毛利率 ≥ ${thresholds.grossMarginMin}%`,
+    currentValueDisplay: financial ? '不适用' : `${f.grossMarginValue.toFixed(1)}%`,
     isPassed: isGrossMarginOk,
     severity: 'high',
-    explanation: isGrossMarginOk
-      ? '毛利率充裕，具备品牌或技术溢价，原材料上涨时能转嫁成本。'
-      : '毛利率过薄，极度容易受上游原材料涨价与下游价格战两头挤压。',
-    actionIfFailed: '若处于红海价格战行业，需确认其具有绝对规模成本优势。',
+    explanation: financial
+      ? '银行、保险、证券没有可与消费股对比的产品毛利率。'
+      : isGrossMarginOk
+      ? '毛利率达到当前原型阈值。'
+      : '毛利率低于当前原型阈值，定价权偏弱。',
+    actionIfFailed: '若处于价格战行业，需要另有规模或成本优势才能保留。',
   });
 
   // 3. Gate 2: 估值与性价比检查

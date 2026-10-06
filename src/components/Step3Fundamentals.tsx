@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { StockData, InstitutionalHoldingOverview } from '../types/stock';
 import { ShieldCheck, CheckCircle2, AlertCircle, TrendingUp, Users2, ChevronDown, ChevronUp, Fingerprint, Activity, ShieldAlert, Database, Sparkles, RefreshCw, FileSearch, Loader2 } from 'lucide-react';
 import { SemanticBadge } from './common/SemanticBadge';
+import { calculateFundamentalScan } from '../utils/stockCalculator';
+import { describeFundamentalRules } from '../utils/fundamentalProfile';
 import { fetchStockHoldings } from '../data/holdingsData';
 import { calculateBeneishAndAltman } from '../utils/institutionalForensics';
 import { calculatePiotroski } from '../utils/piotroski';
@@ -23,7 +25,7 @@ interface Step3FundamentalsProps {
 }
 
 export const Step3Fundamentals: React.FC<Step3FundamentalsProps> = ({ stock }) => {
-  const f = stock.fundamentals;
+  const f = calculateFundamentalScan(stock);
   const forensics = calculateBeneishAndAltman(stock);
   const [financialReading, setFinancialReading] = useState<any | null>(null);
   const [readingLoading, setReadingLoading] = useState(false);
@@ -80,7 +82,7 @@ export const Step3Fundamentals: React.FC<Step3FundamentalsProps> = ({ stock }) =
     try {
       const res = await request<{ success: boolean; report?: any; error?: string }>('/api/financial-analysis', {
         method: 'POST',
-        body: JSON.stringify({ stock }),
+        body: JSON.stringify({ symbol: stock.symbol }),
         timeoutMs: 25000,
       });
       if (res?.report) setFinancialReading(res.report);
@@ -92,50 +94,7 @@ export const Step3Fundamentals: React.FC<Step3FundamentalsProps> = ({ stock }) =
     }
   };
 
-  const rules = [
-    {
-      id: 'grossMargin',
-      label: '毛利率 > 30%',
-      value: `${f.grossMarginValue}%`,
-      pass: f.grossMarginPass,
-      desc: '考核核心护城河定价权，拒绝无壁垒价格战。',
-    },
-    {
-      id: 'netMargin',
-      label: '净利率 > 10%',
-      value: `${f.netMarginValue}%`,
-      pass: f.netMarginPass,
-      desc: '考核剔除三费及销售折让后的真实变现质量。',
-    },
-    {
-      id: 'debtRatio',
-      label: '资产负债率 < 60%',
-      value: `${f.debtRatioValue}%`,
-      pass: f.debtRatioPass,
-      desc: '排查财务杠杆与还本付息刚性风险。',
-    },
-    {
-      id: 'roe',
-      label: 'ROE (净资产收益率) > 15%',
-      value: `${f.roeValue}%`,
-      pass: f.roePass,
-      desc: '巴菲特核心指标，反映单位所有者权益内生回报率。',
-    },
-    {
-      id: 'revenueGrowth',
-      label: '营收复合增速 > 5%',
-      value: `${f.revenueGrowthValue}%`,
-      pass: f.revenueGrowthPass,
-      desc: '检验终端真实订单动能与市场扩张能力。',
-    },
-    {
-      id: 'cashFlow',
-      label: '经营现金流 > 净利润',
-      value: f.cashFlowPass ? '真金白银' : '应收倒挂',
-      pass: f.cashFlowPass,
-      desc: '杜绝纸面繁荣，排查通过赊销压库确认虚假利润。',
-    },
-  ];
+  const rules = describeFundamentalRules({ ...stock, fundamentals: f });
 
   return (
     <div className="bg-white dark:bg-[#1C2426] border border-[#E3E7E1] dark:border-[#2A383A] rounded-2xl p-6 shadow-xs mb-8 transition-colors">
@@ -250,7 +209,7 @@ export const Step3Fundamentals: React.FC<Step3FundamentalsProps> = ({ stock }) =
                 )}
               </h4>
               <p className="text-xs text-[#576F73] dark:text-[#9BB2B4]">
-                穿透粉饰报表与纸面利润，识别虚增应收账款及两到三年内隐形债务爆雷危机
+                五变量 M-Score，TATA 用经营现金流。Z-Score 用净利润近似 EBIT、账面权益近似市值，不适用于银行。
               </p>
             </div>
           </div>

@@ -41,7 +41,7 @@ export const InvestigativeHeaderBar: React.FC<InvestigativeHeaderBarProps> = ({
               <span className="w-2 h-2 rounded-full bg-rose-400 animate-pulse"></span>
               通用分析框架实战应用
             </span>
-            <span className="text-xs text-slate-400">反常现象 → 利益闭环 → 实锤数据 → 情绪引爆</span>
+            <span className="text-xs text-slate-400">编辑案例 / 模型推演，下列数字不是公司披露，不能和财报模块的真实科目混读</span>
           </div>
           <h2 className="text-lg sm:text-xl font-black text-white mt-1">
             深度商业穿透引擎 · 当前聚焦：

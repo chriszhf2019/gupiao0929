@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { auditPeerRecommendation } from '../peerRecommendationAuditor';
 import { auditPortfolioHealth } from '../portfolioHealthAuditor';
+import { auditStockReliability } from '../reliabilityAuditor';
 import { makeStock } from '../../test/fixtures';
 
 describe('auditPeerRecommendation 荐股验真', () => {
@@ -56,5 +57,31 @@ describe('auditPortfolioHealth 持仓体检', () => {
     );
     expect(report.holdingsAudit[0].healthLevel).toBe('critical_danger');
     expect(report.highRiskExposurePercent).toBeGreaterThan(0);
+  });
+
+  it('银行高负债不因资产负债率被判高危', () => {
+    const stock = makeStock();
+    stock.sector = '商业银行 / 金融板块';
+    stock.macro.sectorName = '银行业';
+    stock.fundamentals.debtRatioValue = 91;
+    const report = auditPortfolioHealth(
+      [{ symbol: '000001', name: '平安银行', shares: 100, costPrice: 10, currentPrice: 12 }],
+      { '000001': stock }
+    );
+    expect(report.holdingsAudit[0].healthLevel).not.toBe('critical_danger');
+  });
+});
+
+describe('auditStockReliability 现金流门禁', () => {
+  it('净利润不为正时不能默认通过', () => {
+    const stock = makeStock();
+    stock.financialHistory = stock.financialHistory.map((year, index, arr) =>
+      index === arr.length - 1 ? { ...year, netProfit: -12, freeCashFlow: 5 } : year
+    );
+    const report = auditStockReliability(stock);
+    const cash = report.items.find((item) => item.id === 'gate1_cash_flow');
+    expect(cash?.isPassed).toBe(false);
+    expect(cash?.currentValueDisplay).toContain('无法计算');
+    expect(report.canBuyDecision).toBe('strictly_forbidden');
   });
 });

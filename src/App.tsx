@@ -144,6 +144,15 @@ export default function App() {
 
       {/* Main Container */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6">
+        {(isStockLoading || stockError) && (
+          <div className={`mb-4 rounded-xl border px-4 py-2 text-xs ${
+            stockError
+              ? 'border-[#A84A3E]/40 bg-[#A84A3E]/10 text-[#7D3228] dark:text-[#E2897E]'
+              : 'border-[#E3E7E1] dark:border-[#2A383A] bg-white dark:bg-[#1C2426] text-[#576F73] dark:text-[#9BB2B4]'
+          }`}>
+            {stockError ? `行情同步失败：${stockError}` : `正在同步 ${currentSymbol} 的行情与财报…`}
+          </div>
+        )}
         <Suspense fallback={<ViewLoadingFallback />}>
         {/* View 1: Five-Step Deep Dive */}
         {currentView === 'market' && (

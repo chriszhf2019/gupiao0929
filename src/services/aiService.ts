@@ -32,7 +32,7 @@ export const aiService = {
     try {
       const response = await request<StockAnalysisApiResponse>('/api/stock-analysis', {
         method: 'POST',
-        body: JSON.stringify({ stock, macroSlider }),
+        body: JSON.stringify({ symbol: stock.symbol, macroSlider }),
         timeoutMs: 20000,
       });
 
@@ -59,7 +59,7 @@ export const aiService = {
         method: 'POST',
         body: JSON.stringify({
           message,
-          stockContext,
+          symbol: stockContext.symbol,
           chatHistory: chatHistory || [],
         }),
         timeoutMs: 20000,

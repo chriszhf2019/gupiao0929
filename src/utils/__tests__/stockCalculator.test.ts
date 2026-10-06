@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { calculateFundamentalScan, computeFiveStepSummary } from '../stockCalculator';
+import { calculateFundamentalScan, computeFiveStepSummary, generateLocalReport } from '../stockCalculator';
 import { makeStock } from '../../test/fixtures';
 
 describe('calculateFundamentalScan 六维排雷', () => {
@@ -22,6 +22,37 @@ describe('calculateFundamentalScan 六维排雷', () => {
     stock.fundamentals.debtRatioValue = 65;
     const scan = calculateFundamentalScan(stock);
     expect(scan.debtRatioPass).toBe(false);
+  });
+
+  it('银行高负债不计入否决，评分只看适用项', () => {
+    const stock = makeStock();
+    stock.sector = '商业银行 / 金融板块';
+    stock.macro.sectorName = '银行业';
+    stock.fundamentals.debtRatioValue = 91;
+    stock.fundamentals.roeValue = 11;
+    stock.fundamentals.revenueGrowthValue = 4;
+    const scan = calculateFundamentalScan(stock);
+    expect(scan.debtRatioPass).toBe(true);
+    expect(scan.grossMarginPass).toBe(true);
+    expect(scan.overallScore).toBe(100);
+  });
+
+  it('成长股营收增速低于 20% 不达标', () => {
+    const stock = makeStock();
+    stock.fundamentals.revenueGrowthValue = 10;
+    const scan = calculateFundamentalScan(stock, 'growth_innovator');
+    expect(scan.revenueGrowthPass).toBe(false);
+  });
+});
+
+describe('generateLocalReport 本地兜底文案', () => {
+  it('高分位不会写成极高安全边际', () => {
+    const stock = makeStock();
+    stock.valuation.historicalPePercentile = 92;
+    const report = generateLocalReport(stock, 5);
+    expect(report.summary).not.toContain('极高安全边际');
+    expect(report.summary).toContain('安全边际很薄');
+    expect(report.source).toBe('local');
   });
 });
 

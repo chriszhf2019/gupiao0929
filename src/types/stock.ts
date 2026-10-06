@@ -7,7 +7,7 @@ export interface FinancialYear {
   netMargin: number; // %
   roe: number; // %
   debtToAsset: number; // %
-  freeCashFlow: number; // 亿元
+  freeCashFlow: number; // 经营现金流净额（亿元）。字段名沿用历史命名；数据源是现金流量表经营活动现金流，不是扣减资本开支后的自由现金流。
   // —— 资产负债表科目（亿元，来自东财/腾讯真实披露；缺失时用于 Beneish/Z-Score 的诚实降级）——
   receivables?: number; // 应收账款
   totalAssets?: number; // 总资产
@@ -526,6 +526,7 @@ export interface StrategyBacktestResult {
   insufficientData?: boolean; // 真实 K 线不足，无法回测
   insufficientReason?: string;
   costNote?: string; // 交易成本假设说明
+  annualizedReliable?: boolean; // 样本短于一年时为 false，年化收益与夏普不应展示
   performanceSeries: BacktestPerformancePoint[];
   tradeSignalsSummary: {
     date: string;
@@ -659,6 +660,7 @@ export interface ScenarioValuationModel {
   };
   probabilityWeightedPrice: number; // 概率加权公允价 (Bear 25% + Base 50% + Bull 25%)
   riskRewardRatio: number;          // 上行潜力 / 下行风险比率
+  assumptionNote?: string;          // 基准增速与退出 PE 的来源说明
 }
 
 // --- 个人投资精准决策与复盘档案 (Personal Investment Decision Ledger & Memo) ---

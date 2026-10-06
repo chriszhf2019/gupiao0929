@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { StockData, DeepExploreAIResult } from '../types/stock';
 import { getDeepExplorationForStock } from '../data/deepExplorationData';
 import { PRESET_STOCKS } from '../data/presetStocks';
+import { request } from '../services/apiClient';
 import { InvestigativeDeepDiveModule } from './InvestigativeDeepDiveModule';
 import {
   Compass,
@@ -96,16 +97,14 @@ export const DeepExplorationView: React.FC<DeepExplorationViewProps> = ({
     setAiError(null);
 
     try {
-      const response = await fetch('/api/deep-explore', {
+      const data = await request<{ success: boolean; report?: DeepExploreAIResult; error?: string }>('/api/deep-explore', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          stock: stock,
+          symbol: stock.symbol,
           topic: finalTopic,
         }),
+        timeoutMs: 25000,
       });
-
-      const data = await response.json();
       if (data.success && data.report) {
         setAiResult(data.report);
       } else {

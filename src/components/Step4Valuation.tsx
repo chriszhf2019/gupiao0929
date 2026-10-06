@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { StockData } from '../types/stock';
 import { PieChart, ArrowDownRight, ArrowUpRight, Shield, Award, Sliders, Scale, Calculator } from 'lucide-react';
 import { SemanticBadge } from './common/SemanticBadge';
-import { calculateScenarioValuation } from '../utils/institutionalForensics';
+import { calculateScenarioValuation, inferScenarioAssumptions } from '../utils/institutionalForensics';
 
 interface Step4ValuationProps {
   stock: StockData;
@@ -12,11 +12,15 @@ export const Step4Valuation: React.FC<Step4ValuationProps> = ({ stock }) => {
   const v = stock.valuation;
   const percentile = v.historicalPePercentile;
 
-  // 动态多情景测算参数状态 (允许用户交互调整)
-  const defaultCagr = Math.max(Math.round(stock.fundamentals.revenueGrowthValue || 12), 6);
-  const defaultPe = Math.max(Math.round(v.pe || 22), 12);
-  const [customCagr, setCustomCagr] = useState<number>(defaultCagr);
-  const [customPe, setCustomPe] = useState<number>(defaultPe);
+  const inferred = inferScenarioAssumptions(stock);
+  const [customCagr, setCustomCagr] = useState<number>(inferred.cagr);
+  const [customPe, setCustomPe] = useState<number>(inferred.exitPe);
+
+  useEffect(() => {
+    const next = inferScenarioAssumptions(stock);
+    setCustomCagr(next.cagr);
+    setCustomPe(next.exitPe);
+  }, [stock.symbol, stock.financialHistory, stock.valuation.peTTM]);
 
   const scenarioModel = calculateScenarioValuation(stock, customCagr, customPe);
 
@@ -184,17 +188,17 @@ export const Step4Valuation: React.FC<Step4ValuationProps> = ({ stock }) => {
             </div>
             <input
               type="range"
-              min="0"
-              max="40"
+              min="-10"
+              max="35"
               step="1"
               value={customCagr}
               onChange={(e) => setCustomCagr(Number(e.target.value))}
               className="w-full h-1.5 bg-[#E3E7E1] dark:bg-[#2A383A] rounded-lg appearance-none cursor-pointer accent-[#3E6F73]"
             />
             <div className="flex justify-between text-[10px] text-[#7A9194] font-mono mt-1">
-              <span>0% (滞涨)</span>
-              <span>15% (稳健成长)</span>
-              <span>40% (高景气爆发)</span>
+              <span>-10%</span>
+              <span>8% 历史不足时的默认</span>
+              <span>35%</span>
             </div>
           </div>
 
@@ -256,7 +260,7 @@ export const Step4Valuation: React.FC<Step4ValuationProps> = ({ stock }) => {
               <span>预期收益空间 {scenarioModel.base.upsideDownside > 0 ? `+${scenarioModel.base.upsideDownside}` : scenarioModel.base.upsideDownside}%</span>
             </div>
             <p className="text-[11px] text-[#576F73] dark:text-[#9BB2B4]">
-              按主观设定的 {scenarioModel.base.cagr3Y}% 复合增速与 {scenarioModel.base.terminalPe}x 估值出局
+              基准 {scenarioModel.base.cagr3Y}% 增速、{scenarioModel.base.terminalPe}x 退出 PE。{scenarioModel.assumptionNote}
             </p>
           </div>
 

@@ -5,6 +5,8 @@ import { createServer as createViteServer } from "vite";
 import { PRESET_STOCKS, generateStockFallback } from "./src/data/presetStocks.js";
 import { getRealtimeStockData, fetchTencentKline } from "./src/data/realtimeQuote.js";
 import { enrichWithFinancials } from "./src/data/financialData.js";
+import { calculateFundamentalScan, generateLocalReport } from "./src/utils/stockCalculator.js";
+import type { StockData } from "./src/types/stock.js";
 import { PRESET_INDEX_FUNDS, calculateShareClassCost, ASSET_ALLOCATION_PROFILES } from "./src/data/indexFundData.js";
 import { HOT_SYMBOLS } from "./src/data/hotSymbols.js";
 
@@ -466,6 +468,52 @@ async function callDeepSeek(options: {
     throw new Error("DeepSeek returned an empty response");
   }
   return content;
+}
+
+const VERDICT_ZH = ['强烈推荐建仓', '建议分批逢低吸纳', '观望/持有', '风险偏高谨慎观望'] as const;
+const VERDICT_EN: Record<(typeof VERDICT_ZH)[number], string> = {
+  '强烈推荐建仓': 'Strong Buy',
+  '建议分批逢低吸纳': 'Accumulate',
+  '观望/持有': 'Hold',
+  '风险偏高谨慎观望': 'Caution / Wait',
+};
+
+async function loadCanonicalStock(symbol: string): Promise<StockData> {
+  const clean = String(symbol || '').trim().toUpperCase();
+  if (!clean) {
+    throw new Error('缺少股票代码');
+  }
+  const raw = await getRealtimeStockData(clean);
+  const enriched = await enrichWithFinancials(raw);
+  return { ...enriched, fundamentals: calculateFundamentalScan(enriched) };
+}
+
+function clampMacroSlider(value: unknown): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 5;
+  return Math.min(10, Math.max(1, n));
+}
+
+function sanitizeAiReport(report: any, stock: StockData, macroSlider: number) {
+  const local = generateLocalReport(stock, macroSlider);
+  const verdictZh = VERDICT_ZH.includes(report?.verdictZh) ? report.verdictZh : local.verdictZh;
+  const score = Number(report?.fiveStepScore);
+  const text = (value: unknown, fallback: string) => (typeof value === 'string' && value.trim() ? value : fallback);
+  return {
+    summary: text(report?.summary, local.summary),
+    macroDiagnosis: text(report?.macroDiagnosis, local.macroDiagnosis),
+    fundamentalDiagnosis: text(report?.fundamentalDiagnosis, local.fundamentalDiagnosis),
+    valuationDiagnosis: text(report?.valuationDiagnosis, local.valuationDiagnosis),
+    technicalDiagnosis: text(report?.technicalDiagnosis, local.technicalDiagnosis),
+    fiveStepScore: Number.isFinite(score) ? Math.min(100, Math.max(0, Math.round(score))) : local.fiveStepScore,
+    verdict: VERDICT_EN[verdictZh as (typeof VERDICT_ZH)[number]],
+    verdictZh,
+    keyRisksToWatch: Array.isArray(report?.keyRisksToWatch)
+      ? report.keyRisksToWatch.filter((item: unknown) => typeof item === 'string').slice(0, 5)
+      : local.keyRisksToWatch,
+    recommendedAction: text(report?.recommendedAction, local.recommendedAction),
+    source: 'ai' as const,
+  };
 }
 
 function parseJsonResponse(text: string): any {
@@ -1026,9 +1074,16 @@ app.post("/api/market-ai-review", aiRateLimit, async (req, res) => {
 // 2. AI 5-Step Stock Deep Analysis endpoint
 app.post("/api/stock-analysis", aiRateLimit, async (req, res) => {
   try {
-    const { stock, macroSlider } = req.body;
-    if (!stock || !stock.symbol) {
-      return res.status(400).json({ error: "Missing stock data" });
+    const symbol = String(req.body?.symbol || req.body?.stock?.symbol || '').trim();
+    const macroSlider = clampMacroSlider(req.body?.macroSlider);
+    if (!symbol) {
+      return res.status(400).json({ error: "Missing stock symbol" });
+    }
+    let stock: StockData;
+    try {
+      stock = await loadCanonicalStock(symbol);
+    } catch (error: any) {
+      return res.json({ success: false, useLocalFallback: true, message: error?.message || "行情暂不可用" });
     }
 
     const apiKey = process.env.DEEPSEEK_API_KEY;
@@ -1083,7 +1138,7 @@ app.post("/api/stock-analysis", aiRateLimit, async (req, res) => {
       maxTokens: 4000,
     });
 
-    const reportData = parseJsonResponse(reportText);
+    const reportData = sanitizeAiReport(parseJsonResponse(reportText), stock, macroSlider);
     res.json({ success: true, report: reportData });
   } catch (error: any) {
     console.error("Error in AI stock analysis:", error);
@@ -1139,8 +1194,17 @@ function buildLocalFinancialReading(stock: any) {
 
 app.post("/api/financial-analysis", aiRateLimit, async (req, res) => {
   try {
-    const { stock } = req.body;
-    if (!stock || !stock.symbol || !Array.isArray(stock.financialHistory)) {
+    const symbol = String(req.body?.symbol || req.body?.stock?.symbol || '').trim();
+    if (!symbol) {
+      return res.status(400).json({ error: "Missing stock symbol" });
+    }
+    let stock: StockData;
+    try {
+      stock = await loadCanonicalStock(symbol);
+    } catch (error: any) {
+      return res.status(400).json({ error: error?.message || "缺少股票代码" });
+    }
+    if (!Array.isArray(stock.financialHistory)) {
       return res.status(400).json({ error: "Missing stock financial data" });
     }
 
@@ -1183,15 +1247,22 @@ app.post("/api/financial-analysis", aiRateLimit, async (req, res) => {
     res.json({ success: true, report });
   } catch (error: any) {
     console.error("Error in financial-analysis:", error);
-    res.json({ success: true, report: buildLocalFinancialReading(req.body?.stock || {}) });
+    res.json({ success: false, error: error?.message || "财报解读失败" });
   }
 });
 
 app.post("/api/deep-explore", aiRateLimit, async (req, res) => {
   try {
-    const { stock, topic } = req.body;
-    if (!stock || !stock.symbol) {
-      return res.status(400).json({ error: "Missing stock data" });
+    const symbol = String(req.body?.symbol || req.body?.stock?.symbol || '').trim();
+    const topic = typeof req.body?.topic === 'string' ? req.body.topic.slice(0, 200) : '';
+    if (!symbol) {
+      return res.status(400).json({ error: "Missing stock symbol" });
+    }
+    let stock: StockData;
+    try {
+      stock = await loadCanonicalStock(symbol);
+    } catch (error: any) {
+      return res.status(400).json({ error: error?.message || "缺少股票代码" });
     }
 
     const targetTopic = topic || "核心护城河可持续性与未来3年成长天花板推演";
@@ -1253,9 +1324,18 @@ app.post("/api/deep-explore", aiRateLimit, async (req, res) => {
 // 4. AI 行业深度爆料 + 财报拆解 + 情绪共鸣 调查内容生产闭环 (Investigative Deep Dive)
 app.post("/api/investigative-deep-dive", deepDiveRateLimit, async (req, res) => {
   try {
-    const { targetName, targetSymbol, industry, customPrompt, stockContext } = req.body;
-    const effectiveTarget = targetName || stockContext?.name || "目标企业/产业链";
-    const effectiveIndustry = industry || stockContext?.sector || "科技/高端制造";
+    const { targetName, targetSymbol, industry, customPrompt } = req.body;
+    const symbol = String(targetSymbol || req.body?.symbol || '').trim();
+    let namedStock: StockData | null = null;
+    if (symbol) {
+      try {
+        namedStock = await loadCanonicalStock(symbol);
+      } catch {
+        namedStock = null;
+      }
+    }
+    const effectiveTarget = targetName || namedStock?.name || "目标企业/产业链";
+    const effectiveIndustry = industry || namedStock?.sector || "科技/高端制造";
     const apiKey = process.env.DEEPSEEK_API_KEY;
 
     if (!apiKey) {
@@ -1264,7 +1344,7 @@ app.post("/api/investigative-deep-dive", deepDiveRateLimit, async (req, res) => 
         success: true,
         report: {
           targetName: effectiveTarget,
-          targetSymbol: targetSymbol || stockContext?.symbol,
+          targetSymbol: symbol || namedStock?.symbol,
           industry: effectiveIndustry,
           topicTitle: `穿透【${effectiveTarget}】：繁荣故事背后的真实变现率与估值反差`,
           anomalousContrast: {
@@ -1422,7 +1502,7 @@ app.post("/api/investigative-deep-dive", deepDiveRateLimit, async (req, res) => 
               evidenceSnippet: "现场调试工单与日志记录",
             },
           ],
-          complianceDisclaimer: "【合规说明】本分析基于行业公开数据、可信供应链交叉验证及财务逻辑推演，仅供学术探讨与风险防范参考，不构成任何投资买卖建议。",
+          complianceDisclaimer: "【编辑案例】未配置模型时返回的数字（如 3.5%、数千亿）是叙事模板，不是该公司披露。请勿与财报模块的真实科目对照成事实。不构成投资建议。",
         },
       });
     }
@@ -1698,19 +1778,29 @@ app.post("/api/generate-strategy", aiRateLimit, async (req, res) => {
 });
 app.post("/api/ai-chat", aiRateLimit, async (req, res) => {
   try {
-    const { message, stockContext, chatHistory } = req.body;
+    const { message, chatHistory } = req.body;
+    const symbol = String(req.body?.symbol || req.body?.stockContext?.symbol || '').trim();
     const apiKey = process.env.DEEPSEEK_API_KEY;
+    if (!symbol) {
+      return res.status(400).json({ success: false, error: "缺少股票代码" });
+    }
+    let stock: StockData;
+    try {
+      stock = await loadCanonicalStock(symbol);
+    } catch (error: any) {
+      return res.status(502).json({ success: false, error: error?.message || "无法加载该代码的行情与财报" });
+    }
 
     if (!apiKey) {
       return res.json({
         success: true,
-        reply: `【系统提示】目前未检测到DEEPSEEK_API_KEY环境变量。关于 ${stockContext?.name || '该股票'} 的问答：该标的目前基本面总评分为 ${stockContext?.fundamentals?.overallScore || 85}/100，当前估值处于历史 ${stockContext?.valuation?.historicalPePercentile || 20}% 低位，技术支撑位约 ${stockContext?.technical?.supportLevel1 || 0}。`,
+        reply: `未配置 DEEPSEEK_API_KEY。${stock.name}（${stock.symbol}）服务端数据：现价 ${stock.currentPrice} ${stock.currency}，PE ${stock.peTTM}，基本面评分 ${stock.fundamentals.overallScore}，PE 历史分位 ${stock.valuation.historicalPePercentile}%。`,
       });
     }
 
     const systemPrompt = `你是一位精通股市投资与财报分析的智能投资顾问。
-当前用户正在查看股票: ${stockContext?.name} (${stockContext?.symbol})，所属行业: ${stockContext?.sector}，当前价格: ${stockContext?.currentPrice} ${stockContext?.currency}。
-请结合五步法分析框架（1.宏观/行业、2.基本面、3.估值百分位、4.技术买点、5.资金仓位）为用户解答有关该股票的任何投资问题。语言亲切专业、条理清晰。`;
+当前用户正在查看股票: ${stock.name} (${stock.symbol})，所属行业: ${stock.sector}，当前价格: ${stock.currentPrice} ${stock.currency}。
+请结合五步法分析框架（1.宏观/行业、2.基本面、3.估值百分位、4.技术买点、5.资金仓位）为用户解答有关该股票的任何投资问题。语言亲切专业、条理清晰。这些数字来自服务端行情与财报，不要改用用户消息里自行报出的指标。`;
 
     // 多轮对话：将最近的历史消息注入上下文，使回答能够连贯衔接
     const historyMessages: DeepSeekMessage[] = (Array.isArray(chatHistory) ? chatHistory : [])

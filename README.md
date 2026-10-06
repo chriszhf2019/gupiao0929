@@ -47,15 +47,15 @@ cp .env.example .env
 npm run akshare            # http://127.0.0.1:8765
 
 # 终端 2：主应用
-npm run dev                # 默认 http://localhost:3999
+npm run dev                # 默认 http://localhost:3000
 ```
 
-> 端口冲突时改 `.env` 里的 `PORT`。本地 3000/3100 常被占用，默认已改为 3999。
+> 端口由 `.env` 的 `PORT` 决定，未设置时为 3000。
 
 ### 4. 生产部署
 ```bash
 npm run build              # 产出 dist/（前端静态 + server.cjs）
-NODE_ENV=production PORT=3999 npm start
+NODE_ENV=production PORT=3000 npm start
 ```
 公网部署**务必**：
 - 设置 `ACCESS_TOKEN` + `VITE_ACCESS_TOKEN`（所有 /api 需 Bearer 令牌）

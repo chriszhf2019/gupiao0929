@@ -1,5 +1,6 @@
 import { StockData, PeerRecommendationRecord } from '../types/stock';
 import { PRESET_STOCKS } from '../data/presetStocks';
+import { isFinancialSector } from './fundamentalProfile';
 
 /**
  * 针对他人/朋友/大V推荐的股票进行实战验真
@@ -23,10 +24,9 @@ export function auditPeerRecommendation(
   const isValuationTooHigh = pePercentile >= 75;
 
   // 2. 验真：真金白银现金流支撑
-  const cashVsProfit = lastYear?.netProfit && lastYear.netProfit > 0
-    ? (lastYear.freeCashFlow / lastYear.netProfit)
-    : 1.0;
-  const isCashFlowFake = cashVsProfit < 0.6;
+  const profit = lastYear?.netProfit;
+  const cashVsProfit = profit != null && profit > 0 ? lastYear.freeCashFlow / profit : null;
+  const isCashFlowFake = cashVsProfit == null || cashVsProfit < 0.6;
 
   // 3. 验真：筹码与阻力位
   const isUnderHeavyResistance = stock.currentPrice >= stock.technical.resistanceLevel1 * 0.98;
@@ -36,13 +36,15 @@ export function auditPeerRecommendation(
   if (isValuationTooHigh) {
     redFlags.push(`当前估值处于历史 ${pePercentile}% 极高分位，安全垫严重不足，谨防替主力抬轿`);
   }
-  if (isCashFlowFake) {
+  if (cashVsProfit == null) {
+    redFlags.push('最近一期净利润不为正，无法确认利润含金量');
+  } else if (isCashFlowFake) {
     redFlags.push(`经营现金流仅占净利润 ${(cashVsProfit * 100).toFixed(0)}%，财报成色不佳，有坏账粉饰嫌疑`);
   }
   if (isUnderHeavyResistance) {
     redFlags.push(`股价正逼近关键重阻力位 ${stock.technical.resistanceLevel1}，随时可能冲高回落`);
   }
-  if (stock.fundamentals.debtRatioValue > 65) {
+  if (!isFinancialSector(stock) && stock.fundamentals.debtRatioValue > 65) {
     redFlags.push(`资产负债率高达 ${stock.fundamentals.debtRatioValue}%，偿债压力较大`);
   }
 
@@ -82,7 +84,11 @@ export function auditPeerRecommendation(
       {
         dimension: '盈利含金量',
         claim: '对方说公司业绩大赚、成长迅猛',
-        fact: isCashFlowFake ? '现金流远低于净利润，多为未收回的应收账款' : '经营现金流充沛，业绩成色扎实',
+        fact: cashVsProfit == null
+          ? '净利润不为正，无法用现金流占比验证利润含金量'
+          : isCashFlowFake
+          ? '经营现金流远低于净利润'
+          : '经营现金流相对净利润充足',
         isPass: !isCashFlowFake,
       },
       {

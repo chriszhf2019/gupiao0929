@@ -17,6 +17,9 @@ describe('runStrategyBacktest 回测引擎', () => {
     const result = runStrategyBacktest(stock);
     expect(result.insufficientData).toBeUndefined();
     expect(result.performanceSeries.length).toBe(30);
+    expect(result.annualizedReliable).toBe(false);
+    expect(result.annualizedReturnPercent).toBe(0);
+    expect(result.sharpeRatio).toBe(0);
     expect(result.initialCapital).toBe(100000);
   });
 

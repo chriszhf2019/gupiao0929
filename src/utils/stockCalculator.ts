@@ -1,42 +1,22 @@
-import { StockData, FundamentalScan, AIAnalysisReport } from '../types/stock';
+import { StockData, FundamentalScan, AIAnalysisReport, StockAnalysisArchetype } from '../types/stock';
+import { applyFundamentalThresholds, resolveFundamentalThresholds } from './fundamentalProfile';
 
 /**
- * Re-evaluates fundamental scan rules based on stock data
+ * 按行业/原型重算六维基本面。金融业不把资产负债率和毛利率算进否决项。
  */
-export function calculateFundamentalScan(stock: StockData): FundamentalScan {
-  const gmPass = stock.fundamentals.grossMarginValue >= 30;
-  const nmPass = stock.fundamentals.netMarginValue >= 10;
-  const debtPass = stock.fundamentals.debtRatioValue <= 60;
-  const roePass = stock.fundamentals.roeValue >= 15;
-  const revPass = stock.fundamentals.revenueGrowthValue >= 5;
-  const cashPass = stock.fundamentals.cashFlowValue > 0;
-
-  const passes = [gmPass, nmPass, debtPass, roePass, revPass, cashPass].filter(Boolean).length;
-  const score = Math.round((passes / 6) * 100);
-
-  let grade: FundamentalScan['grade'] = 'C';
-  if (score >= 90) grade = 'A+';
-  else if (score >= 75) grade = 'A';
-  else if (score >= 60) grade = 'B';
-  else if (score >= 40) grade = 'C';
-  else grade = 'D';
-
-  return {
-    grossMarginPass: gmPass,
-    grossMarginValue: stock.fundamentals.grossMarginValue,
-    netMarginPass: nmPass,
-    netMarginValue: stock.fundamentals.netMarginValue,
-    debtRatioPass: debtPass,
-    debtRatioValue: stock.fundamentals.debtRatioValue,
-    roePass: roePass,
-    roeValue: stock.fundamentals.roeValue,
-    revenueGrowthPass: revPass,
-    revenueGrowthValue: stock.fundamentals.revenueGrowthValue,
-    cashFlowPass: cashPass,
-    cashFlowValue: stock.fundamentals.cashFlowValue,
-    overallScore: score,
-    grade
-  };
+export function calculateFundamentalScan(stock: StockData, archetype?: StockAnalysisArchetype): FundamentalScan {
+  const thresholds = resolveFundamentalThresholds(stock, archetype);
+  return applyFundamentalThresholds(
+    {
+      grossMarginValue: stock.fundamentals.grossMarginValue,
+      netMarginValue: stock.fundamentals.netMarginValue,
+      debtRatioValue: stock.fundamentals.debtRatioValue,
+      roeValue: stock.fundamentals.roeValue,
+      revenueGrowthValue: stock.fundamentals.revenueGrowthValue,
+      cashFlowValue: stock.fundamentals.cashFlowValue,
+    },
+    thresholds
+  );
 }
 
 /**
@@ -117,13 +97,24 @@ export function computeFiveStepSummary(stock: StockData, macroHeatSlider: number
 /**
  * Fallback static AI analysis generator if server is offline or missing key
  */
+function marginOfSafetyPhrase(percentile: number): string {
+  if (percentile <= 20) return '处于历史低分位，安全边际较厚';
+  if (percentile <= 40) return '处于历史偏低区间，安全边际一般';
+  if (percentile <= 60) return '接近历史中枢，安全边际有限';
+  if (percentile <= 80) return '处于历史偏高区间，安全边际不足';
+  return '处于历史高分位，安全边际很薄';
+}
+
 export function generateLocalReport(stock: StockData, macroSlider: number): AIAnalysisReport {
   const summary = computeFiveStepSummary(stock, macroSlider);
+  const percentile = stock.valuation.historicalPePercentile;
+  const marginPhrase = marginOfSafetyPhrase(percentile);
+  const marginQuality = stock.fundamentals.grossMarginPass ? '毛利率达到当前阈值' : '毛利率未达到当前阈值';
 
   return {
-    summary: `${stock.name} (${stock.symbol}) 股票分析五步走综合评分为 ${summary.totalScore}/100 分。宏观政策热度打分为 ${macroSlider}/10。基本面评分 ${stock.fundamentals.overallScore}/100，毛利率与盈利能力优秀，估值位于历史 ${stock.valuation.historicalPePercentile}% 百分位，具备极高安全边际。`,
+    summary: `${stock.name} (${stock.symbol}) 五步综合评分为 ${summary.totalScore}/100，结论为「${summary.verdict}」。宏观热度 ${macroSlider}/10。基本面 ${stock.fundamentals.overallScore}/100（${marginQuality}）。估值位于历史 ${percentile}% 分位，${marginPhrase}。`,
     macroDiagnosis: `宏观热度调至 ${macroSlider}/10，所属行业为【${stock.macro.sectorName}】，${stock.macro.policyTone}`,
-    fundamentalDiagnosis: `公司财务状况评估等级为 ${stock.fundamentals.grade}。毛利率为 ${stock.fundamentals.grossMarginValue}%（${stock.fundamentals.grossMarginPass ? '符合 >30% 优质选股规则' : '偏低'}），净利率为 ${stock.fundamentals.netMarginValue}%（${stock.fundamentals.netMarginPass ? '符合 >10% 要求' : '偏低'}），资产负债率为 ${stock.fundamentals.debtRatioValue}%。`,
+    fundamentalDiagnosis: `财务评级 ${stock.fundamentals.grade}。毛利率 ${stock.fundamentals.grossMarginValue}%（${stock.fundamentals.grossMarginPass ? '达到当前阈值' : '未达当前阈值'}），净利率 ${stock.fundamentals.netMarginValue}%（${stock.fundamentals.netMarginPass ? '达到当前阈值' : '未达当前阈值'}），资产负债率 ${stock.fundamentals.debtRatioValue}%。`,
     valuationDiagnosis: `当前动态 PE 为 ${stock.valuation.peTTM} 倍，处于 5 年历史 PE 估值的 ${stock.valuation.historicalPePercentile}% 百分位（${stock.valuation.statusZh}），安全边际买入价建议为 ${stock.valuation.marginOfSafetyPrice} ${stock.currency}。`,
     technicalDiagnosis: `技术指标 ${stock.technical.macdSignalZh}，属于 ${stock.technical.trendChannelZh} 形态，关键支撑位 ${stock.technical.supportLevel1} ${stock.currency}，关键压力位 ${stock.technical.resistanceLevel1} ${stock.currency}。`,
     fiveStepScore: summary.totalScore,

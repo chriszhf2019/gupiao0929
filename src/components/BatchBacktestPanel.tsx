@@ -115,7 +115,7 @@ export const BatchBacktestPanel: React.FC<BatchBacktestPanelProps> = ({ candidat
                         {r.result.strategyReturnPercent >= 0 ? '+' : ''}{r.result.strategyReturnPercent}%
                       </td>
                       <td className="py-2 text-right font-mono text-[#576F73] dark:text-[#9BB2B4]">
-                        {r.result.annualizedReturnPercent >= 0 ? '+' : ''}{r.result.annualizedReturnPercent}%
+                        {r.result.annualizedReliable === false ? '--' : `${r.result.annualizedReturnPercent >= 0 ? '+' : ''}${r.result.annualizedReturnPercent}%`}
                       </td>
                       <td className="py-2 text-right font-mono text-[#A84A3E]">-{r.result.maxDrawdownPercent}%</td>
                       <td className="py-2 text-right font-mono text-[#576F73] dark:text-[#9BB2B4]">

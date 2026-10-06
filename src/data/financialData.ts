@@ -1,4 +1,5 @@
 import { StockData, FinancialYear, FundamentalScan } from '../types/stock';
+import { calculateFundamentalScan } from '../utils/stockCalculator';
 
 const TUSHARE_API = (process.env.TUSHARE_API_URL || 'http://api.tushare.pro').replace(/\/+$/, '');
 const EASTMONEY_API = 'https://datacenter.eastmoney.com/securities/api/data/v1/get';
@@ -315,39 +316,19 @@ function buildFundamentalScan(base: StockData, years: FinancialYear[]): Fundamen
   const revenueGrowthValue =
     prev && prev.revenue > 0 ? round1(((latest.revenue - prev.revenue) / prev.revenue) * 100) : base.fundamentals.revenueGrowthValue;
   const cashFlowValue = latest.freeCashFlow;
-
-  const passes = [
-    grossMarginValue >= 30,
-    netMarginValue >= 10,
-    debtRatioValue <= 60,
-    roeValue >= 15,
-    revenueGrowthValue >= 5,
-    cashFlowValue > 0,
-  ].filter(Boolean).length;
-  const score = Math.round((passes / 6) * 100);
-  let grade: FundamentalScan['grade'] = 'C';
-  if (score >= 90) grade = 'A+';
-  else if (score >= 75) grade = 'A';
-  else if (score >= 60) grade = 'B';
-  else if (score >= 40) grade = 'C';
-  else grade = 'D';
-
-  return {
-    grossMarginPass: grossMarginValue >= 30,
-    grossMarginValue: round1(grossMarginValue),
-    netMarginPass: netMarginValue >= 10,
-    netMarginValue: round1(netMarginValue),
-    debtRatioPass: debtRatioValue <= 60,
-    debtRatioValue: round1(debtRatioValue),
-    roePass: roeValue >= 15,
-    roeValue: round1(roeValue),
-    revenueGrowthPass: revenueGrowthValue >= 5,
-    revenueGrowthValue: round1(revenueGrowthValue),
-    cashFlowPass: cashFlowValue > 0,
-    cashFlowValue: round2(cashFlowValue),
-    overallScore: score,
-    grade,
+  const drafted: StockData = {
+    ...base,
+    fundamentals: {
+      ...base.fundamentals,
+      grossMarginValue: round1(grossMarginValue),
+      netMarginValue: round1(netMarginValue),
+      debtRatioValue: round1(debtRatioValue),
+      roeValue: round1(roeValue),
+      revenueGrowthValue: round1(revenueGrowthValue),
+      cashFlowValue: round2(cashFlowValue),
+    },
   };
+  return calculateFundamentalScan(drafted);
 }
 
 export async function enrichWithFinancials(stock: StockData): Promise<StockData> {
