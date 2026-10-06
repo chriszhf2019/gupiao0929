@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { request } from '../services/apiClient';
+import { MarketRegimePanel } from './market/MarketRegimePanel';
+import { ScreenSnapshot } from '../utils/strategyPipeline';
 import { LayoutDashboard, RefreshCw, Sparkles, ArrowUpRight, ArrowDownRight, Activity } from 'lucide-react';
 
 interface MarketIndex {
@@ -61,7 +63,11 @@ function formatTime(iso?: string): string {
   return new Date(iso).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-export const MarketDashboardView: React.FC = () => {
+export const MarketDashboardView: React.FC<{
+  onOpenStrategy?: (prompt: string) => void;
+  onOpenTracking?: (symbol: string) => void;
+  onSelectStock?: (symbol: string) => void;
+}> = ({ onOpenStrategy, onOpenTracking, onSelectStock }) => {
   const [indices, setIndices] = useState<MarketIndex[]>([]);
   const [updatedAt, setUpdatedAt] = useState<string>();
   const [quotes, setQuotes] = useState<QuickQuote[]>([]);
@@ -69,6 +75,8 @@ export const MarketDashboardView: React.FC = () => {
   const [leaders, setLeaders] = useState<BoardQuote[]>([]);
   const [fundFlow, setFundFlow] = useState<BoardQuote[]>([]);
   const [loading, setLoading] = useState(false);
+  const [shanghaiBars, setShanghaiBars] = useState<{ date: string; price: number }[]>([]);
+  const [screenItems, setScreenItems] = useState<ScreenSnapshot[]>([]);
   const [review, setReview] = useState<string>();
   const [reviewLoading, setReviewLoading] = useState(false);
   const [reviewError, setReviewError] = useState<string>();
@@ -76,10 +84,12 @@ export const MarketDashboardView: React.FC = () => {
   const loadMarket = async () => {
     setLoading(true);
     try {
-      const [overview, quick, breadthRes] = await Promise.all([
+      const [overview, quick, breadthRes, kline, screen] = await Promise.all([
         request<MarketOverviewResponse>('/api/market-overview'),
         request<{ success: boolean; quotes?: QuickQuote[] }>('/api/quick-quotes'),
         request<MarketBreadthResponse>('/api/market-breadth'),
+        request<{ success?: boolean; bars?: { date: string; price: number }[] }>('/api/kline/sh000001?days=120'),
+        request<{ items?: ScreenSnapshot[] }>('/api/screener', { timeoutMs: 15000 }).catch(() => ({ items: [] })),
       ]);
       if (overview?.indices) {
         setIndices(overview.indices);
@@ -89,6 +99,8 @@ export const MarketDashboardView: React.FC = () => {
       if (breadthRes?.breadth) setBreadth(breadthRes.breadth);
       if (breadthRes?.leaders) setLeaders(breadthRes.leaders);
       if (breadthRes?.fundFlow) setFundFlow(breadthRes.fundFlow);
+      if (kline?.bars) setShanghaiBars(kline.bars);
+      if (screen?.items) setScreenItems(screen.items);
     } catch (error) {
       console.warn('加载市场数据失败:', error);
     } finally {
@@ -133,7 +145,7 @@ export const MarketDashboardView: React.FC = () => {
           </div>
           <div>
             <h2 className="text-lg font-serif font-bold text-[#1F3437] dark:text-[#E5EBEA]">市场大盘</h2>
-            <p className="text-xs text-[#576F73] dark:text-[#9BB2B4]">主要指数与核心标的行情 · 数据来自东方财富/腾讯公开接口</p>
+            <p className="text-xs text-[#576F73] dark:text-[#9BB2B4]">先看现在的指数和涨跌家数，再用上证日 K 判断趋势，然后选出该跟进的策略。</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -148,6 +160,17 @@ export const MarketDashboardView: React.FC = () => {
           </button>
         </div>
       </div>
+
+      <MarketRegimePanel
+        indices={indices}
+        breadth={breadth}
+        bars={shanghaiBars}
+        leaders={leaders}
+        screenItems={screenItems}
+        onOpenStrategy={onOpenStrategy}
+        onOpenTracking={onOpenTracking}
+        onSelectStock={onSelectStock}
+      />
 
       {/* 指数卡片 */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">

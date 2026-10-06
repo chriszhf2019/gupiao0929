@@ -1,4 +1,5 @@
 import { StockData } from '../types/stock';
+import { normalizeListing } from '../utils/symbolCode';
 
 export const PRESET_STOCKS: Record<string, StockData> = {
   '600519': {
@@ -388,10 +389,9 @@ export const PRESET_STOCKS: Record<string, StockData> = {
  */
 export function generateStockFallback(symbol: string): StockData {
   const cleanSym = symbol.trim().toUpperCase();
-  const isUS = /^[A-Z]{1,5}$/.test(cleanSym);
-  const isHK = /^\d{5}$|^\d{4}\.HK$/.test(cleanSym);
-  const market = isUS ? 'US-Share' : isHK ? 'HK-Share' : 'A-Share';
-  const currency = isUS ? 'USD' : isHK ? 'HKD' : 'CNY';
+  const listing = normalizeListing(cleanSym);
+  const market = listing?.market ?? 'A-Share';
+  const currency = listing?.currency ?? 'CNY';
 
   // Seeded values from string hash
   let hash = 0;
@@ -420,7 +420,7 @@ export function generateStockFallback(symbol: string): StockData {
     currentPrice,
     changeAmount: Number(((positiveHash % 5) - 2.1).toFixed(2)),
     changePercent: Number(((positiveHash % 4) - 1.5).toFixed(2)),
-    marketCap: isUS ? `$${(positiveHash % 150 + 20)} Billion` : `${(positiveHash % 2000 + 100)}亿元`,
+    marketCap: market === 'US-Share' ? `$${(positiveHash % 150 + 20)} Billion` : `${(positiveHash % 2000 + 100)}亿元`,
     peTTM: Number(peBase.toFixed(1)),
     macro: {
       macroPolicyHeat: (positiveHash % 6) + 4,

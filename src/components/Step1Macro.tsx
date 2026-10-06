@@ -83,7 +83,7 @@ export const Step1Macro: React.FC<Step1MacroProps> = ({
               <span>宏观政策热度自定义评估 (1 - 10 分)</span>
             </label>
             <p className="text-xs text-[#576F73] dark:text-[#9BB2B4] mt-0.5">
-              拖动滑块自定义评估宏观流动性与产业扶持政策的刺激力度，系统将自动重算全盘评级。
+              滑块只记下你自己的热度判断。综合评分使用标的上的政策催化分和行业阶段，拖动不会改写结论。
             </p>
           </div>
 

@@ -1,6 +1,11 @@
-import React, { useState } from 'react';
-import { AIStockStrategy } from '../types/stock';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { AIStockStrategy, SnapshotCandidate } from '../types/stock';
 import { aiService } from '../services/aiService';
+import { request } from '../services/apiClient';
+import { VaultPasswordGate } from './portfolio/VaultPasswordGate';
+import { useStrategyTracking } from '../hooks/useStrategyTracking';
+import { readStrategyLibrary, writeStrategyLibrary } from '../utils/strategyLibrary';
+import { attachPresetMatches, rankSnapshotCandidates, ScreenSnapshot } from '../utils/strategyPipeline';
 import { 
   Sparkles, 
   Send, 
@@ -21,6 +26,8 @@ import {
 interface AIStrategyGeneratorProps {
   onSelectStock: (symbol: string) => void;
   onApplyStrategyFilter?: (strategy: AIStockStrategy) => void;
+  onOpenTracking?: (symbol: string) => void;
+  initialPrompt?: string | null;
 }
 
 const INSPIRATION_IDEAS = [
@@ -45,37 +52,70 @@ const INSPIRATION_IDEAS = [
 export const AIStrategyGenerator: React.FC<AIStrategyGeneratorProps> = ({
   onSelectStock,
   onApplyStrategyFilter,
+  onOpenTracking,
+  initialPrompt,
 }) => {
   const [ideaInput, setIdeaInput] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
   const [currentStrategy, setCurrentStrategy] = useState<AIStockStrategy | null>(null);
-  const [savedStrategies, setSavedStrategies] = useState<AIStockStrategy[]>([]);
+  const [savedStrategies, setSavedStrategies] = useState<AIStockStrategy[]>(() => readStrategyLibrary());
+  const [snapshots, setSnapshots] = useState<SnapshotCandidate[]>([]);
   const [isSaved, setIsSaved] = useState(false);
+  const tracking = useStrategyTracking(onOpenTracking);
+  const seededPrompt = useRef<string | null>(null);
 
-  const handleGenerate = async (promptToUse?: string) => {
+  const handleGenerate = useCallback(async (promptToUse?: string) => {
     const text = (promptToUse || ideaInput).trim();
     if (!text) return;
 
     setIsGenerating(true);
     setIsSaved(false);
+    setGenerateError(null);
 
     try {
       const strategy = await aiService.generateStrategy(text);
       if (strategy) {
-        setCurrentStrategy(strategy);
+        setCurrentStrategy(attachPresetMatches(strategy, text));
+        setSnapshots([]);
+      } else {
+        setGenerateError('这次没有生成策略，请再试一次。');
       }
     } catch (e) {
       console.error('Failed to generate strategy:', e);
+      setGenerateError('策略生成失败，请再试一次。');
     } finally {
       setIsGenerating(false);
     }
-  };
+  }, [ideaInput]);
+
+  useEffect(() => {
+    if (!initialPrompt || seededPrompt.current === initialPrompt) return;
+    seededPrompt.current = initialPrompt;
+    setIdeaInput(initialPrompt);
+    void handleGenerate(initialPrompt);
+  }, [initialPrompt, handleGenerate]);
+
+  useEffect(() => {
+    if (!currentStrategy) return;
+    let cancelled = false;
+    request<{ items?: ScreenSnapshot[] }>('/api/screener', { timeoutMs: 15000 })
+      .then((res) => {
+        if (cancelled) return;
+        setSnapshots(rankSnapshotCandidates(res?.items || [], currentStrategy.styleTag));
+      })
+      .catch(() => {
+        if (!cancelled) setSnapshots([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentStrategy]);
 
   const handleSaveStrategy = () => {
     if (!currentStrategy) return;
-    if (!savedStrategies.some((s) => s.id === currentStrategy.id)) {
-      setSavedStrategies([currentStrategy, ...savedStrategies]);
-    }
+    const next = [currentStrategy, ...savedStrategies.filter((item) => item.id !== currentStrategy.id)];
+    setSavedStrategies(writeStrategyLibrary(next));
     setIsSaved(true);
   };
 
@@ -93,14 +133,28 @@ export const AIStrategyGenerator: React.FC<AIStrategyGeneratorProps> = ({
               <span>输入投资灵感思路，一键生成买方量化选股方案</span>
             </h2>
             <p className="text-xs text-[#576F73] dark:text-[#9BB2B4] mt-1 max-w-3xl">
-              不再被机械参数所束缚。您可以输入任意日常投资思考、赛道偏好或护城河假设，AI 将自动拆解为严谨的【盈利壁垒、排雷指标、估值分位、建仓纪律及匹配候选池】。
+              写下选股思路后，系统按硬条件筛核心池和全市场快照，再用财报外推三年情景价。确认后写入跟踪中心，买点、止损和止盈跟着这组价格走。
             </p>
           </div>
 
           {savedStrategies.length > 0 && (
-            <div className="flex items-center space-x-2 bg-[#F6F7F5] dark:bg-[#141A1B] px-3 py-1.5 rounded-xl border border-[#E3E7E1] dark:border-[#2A383A] text-xs font-mono text-[#576F73] dark:text-[#9BB2B4]">
-              <Bookmark className="w-3.5 h-3.5 text-[#3E6F73]" />
-              <span>已归档策略: {savedStrategies.length} 套</span>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-[#576F73] dark:text-[#9BB2B4]">
+              <span className="inline-flex items-center space-x-1">
+                <Bookmark className="w-3.5 h-3.5 text-[#3E6F73]" />
+                <span>已归档 {savedStrategies.length} 套</span>
+              </span>
+              {savedStrategies.map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => {
+                    setCurrentStrategy(attachPresetMatches(item, item.ideaPrompt));
+                    setIsSaved(true);
+                  }}
+                  className="px-2 py-1 rounded-lg border border-[#E3E7E1] dark:border-[#2A383A] hover:border-[#3E6F73] cursor-pointer"
+                >
+                  {item.strategyName}
+                </button>
+              ))}
             </div>
           )}
         </div>
@@ -164,7 +218,19 @@ export const AIStrategyGenerator: React.FC<AIStrategyGeneratorProps> = ({
             )}
           </button>
         </div>
+        {generateError && <p className="mt-3 text-xs text-[#A84A3E]">{generateError}</p>}
       </div>
+
+      {tracking.pending && (
+        <VaultPasswordGate
+          status={tracking.vault.status}
+          error={tracking.vault.error}
+          onUnlock={tracking.vault.unlock}
+          onSetup={tracking.vault.setup}
+          onReset={tracking.vault.reset}
+        />
+      )}
+      {tracking.error && <p className="text-xs text-[#A84A3E]">{tracking.error}</p>}
 
       {/* 策略呈现区域 */}
       {currentStrategy && (
@@ -340,9 +406,13 @@ export const AIStrategyGenerator: React.FC<AIStrategyGeneratorProps> = ({
                 <span>基于此策略实时匹配的候选资产池（Top Matches）</span>
               </div>
               <span className="text-[11px] text-[#576F73] dark:text-[#9BB2B4]">
-                点击任意标的即可深入研判
+                只保留通过硬条件的标的，并附上三年情景价
               </span>
             </div>
+
+            {currentStrategy.matchedStocks.length === 0 && (
+              <p className="text-xs text-[#576F73] dark:text-[#9BB2B4] mb-3">核心池里没有同时满足这些硬条件的标的。</p>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               {currentStrategy.matchedStocks.map((stock) => (
@@ -398,13 +468,72 @@ export const AIStrategyGenerator: React.FC<AIStrategyGeneratorProps> = ({
                     ))}
                   </div>
 
-                  <div className="flex items-center justify-between text-xs font-medium text-[#3E6F73] dark:text-[#76B4B9] group-hover:translate-x-0.5 transition-transform pt-1">
-                    <span>深入五步完整研判</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
+                  {stock.outlook.basis === 'scenario' ? (
+                    <div className="grid grid-cols-3 gap-1 text-center font-mono mb-3">
+                      <div>
+                        <div className="text-[10px] text-[#7A9194]">悲观</div>
+                        <div className="text-xs font-bold text-[#A84A3E]">{stock.outlook.bearPrice}</div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] text-[#7A9194]">基准</div>
+                        <div className="text-xs font-bold text-[#1F3437] dark:text-[#E5EBEA]">{stock.outlook.basePrice}</div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] text-[#7A9194]">乐观</div>
+                        <div className="text-xs font-bold text-[#4A7C6F]">{stock.outlook.bullPrice}</div>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-[10px] text-[#7A9194] mb-3">{stock.outlook.note}</p>
+                  )}
+
+                  <div className="flex items-center justify-between text-xs font-medium pt-1">
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        tracking.track(stock.symbol, currentStrategy.strategyName);
+                      }}
+                      className="px-2 py-1 rounded-lg bg-[#1F3437] text-white cursor-pointer"
+                    >
+                      {tracking.busySymbol === stock.symbol ? '写入中...' : tracking.trackedSymbols.has(stock.symbol) ? '更新跟踪' : '预测并跟踪'}
+                    </button>
+                    <span className="text-[#3E6F73] dark:text-[#76B4B9] inline-flex items-center space-x-1">
+                      <span>五步研判</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </span>
                   </div>
                 </div>
               ))}
             </div>
+
+            {snapshots.length > 0 && (
+              <div className="mt-5">
+                <div className="text-xs font-bold text-[#1F3437] dark:text-[#E5EBEA] mb-2">
+                  全市场快照里符合规则的标的（尚无股息和完整财报，跟踪时再算情景价）
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {snapshots.map((item) => (
+                    <div key={item.symbol} className="p-3 rounded-xl border border-[#E3E7E1] dark:border-[#2A383A] text-xs">
+                      <div className="flex items-center justify-between mb-1">
+                        <button type="button" onClick={() => onSelectStock(item.symbol)} className="font-bold text-[#1F3437] dark:text-[#E5EBEA] cursor-pointer">
+                          {item.name} <span className="font-mono text-[#7A9194]">({item.symbol})</span>
+                        </button>
+                        <span className="font-mono text-[#3E6F73]">{item.matchScore}</span>
+                      </div>
+                      <p className="text-[11px] text-[#576F73] dark:text-[#9BB2B4] mb-2">{item.industry} · {item.reasons.join(' · ')}</p>
+                      <button
+                        type="button"
+                        onClick={() => tracking.track(item.symbol, currentStrategy.strategyName)}
+                        className="px-2 py-1 rounded-lg bg-[#1F3437] text-white cursor-pointer"
+                      >
+                        {tracking.busySymbol === item.symbol ? '写入中...' : '拉财报、预测并跟踪'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

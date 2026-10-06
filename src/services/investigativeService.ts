@@ -41,7 +41,7 @@ export const investigativeService = {
           targetSymbol: targetSymbol || (stockContext?.name === finalTarget ? stockContext?.symbol : undefined),
           industry: industry || stockContext?.sector,
           customPrompt: customPrompt?.trim() || undefined,
-          stockContext,
+          symbol: targetSymbol || stockContext?.symbol,
         }),
         timeoutMs: 30000, // 生成深度研报给予 30 秒超时
       });

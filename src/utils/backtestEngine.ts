@@ -268,7 +268,8 @@ export function runStrategyBacktest(
     ? `${prices[0].date} ~ ${prices[prices.length - 1].date}（${calendarDays} 个日历日 / ${prices.length} 个交易日）`
     : `近 ${prices.length} 个交易日`;
   const annualizationDays = calendarDays > 0 ? calendarDays : prices.length;
-  const annualized = annualizationDays > 0
+  const annualizedReliable = calendarDays >= 365 || (calendarDays === 0 && prices.length >= 200);
+  const annualized = annualizedReliable && annualizationDays > 0
     ? (Math.pow(finalCapital / initialCapital, 365 / annualizationDays) - 1) * 100
     : 0;
   const annualizedReturnPercent = Number(annualized.toFixed(2));
@@ -287,7 +288,7 @@ export function runStrategyBacktest(
     }
   }
   let sharpeRatio = 0;
-  if (dailyReturns.length >= 2) {
+  if (annualizedReliable && dailyReturns.length >= 2) {
     const mean = dailyReturns.reduce((a, b) => a + b, 0) / dailyReturns.length;
     const variance =
       dailyReturns.reduce((acc, r) => acc + (r - mean) * (r - mean), 0) / (dailyReturns.length - 1);
@@ -322,6 +323,7 @@ export function runStrategyBacktest(
     totalTrades,
     benchmarkAvailable,
     costNote: COST_NOTE,
+    annualizedReliable,
     performanceSeries: series,
     tradeSignalsSummary: signals,
   };

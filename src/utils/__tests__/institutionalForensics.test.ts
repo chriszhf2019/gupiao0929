@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { calculateBeneishAndAltman, calculatePositionSizing } from '../institutionalForensics';
+import { calculateBeneishAndAltman, calculatePositionSizing, calculateScenarioValuation, inferScenarioAssumptions } from '../institutionalForensics';
 import { makeStock, makeFinancialYears } from '../../test/fixtures';
 
 describe('calculateBeneishAndAltman', () => {
@@ -32,6 +32,33 @@ describe('calculateBeneishAndAltman', () => {
     stock.financialHistory[1].freeCashFlow = 10;
     const result = calculateBeneishAndAltman(stock);
     expect(result.components.tata).toBeGreaterThan(0.1);
+  });
+});
+
+describe('calculateScenarioValuation 三情景', () => {
+  it('基准增速来自历史营收，悲观情景是基准的 60%', () => {
+    const stock = makeStock();
+    const assumptions = inferScenarioAssumptions(stock);
+    expect(assumptions.cagr).toBeCloseTo(10, 0);
+    const model = calculateScenarioValuation(stock);
+    expect(model.base.cagr3Y).toBeCloseTo(assumptions.cagr, 1);
+    expect(model.bear.cagr3Y).toBeCloseTo(assumptions.cagr * 0.6, 1);
+    expect(model.assumptionNote).toContain('营收复合增速');
+  });
+
+  it('银行、保险、证券不外推三年目标价', () => {
+    const stock = makeStock({ sector: '商业银行 / 金融板块', macro: { ...makeStock().macro, sectorName: '银行' } });
+    const model = calculateScenarioValuation(stock);
+    expect(model.base.terminalPe).toBe(0);
+    expect(model.assumptionNote).toContain('不给三年目标价');
+  });
+
+  it('最近一期净利润不为正时不外推', () => {
+    const stock = makeStock();
+    stock.financialHistory[stock.financialHistory.length - 1].netProfit = -1;
+    const model = calculateScenarioValuation(stock);
+    expect(model.base.upsideDownside).toBe(0);
+    expect(model.assumptionNote).toContain('无法外推');
   });
 });
 

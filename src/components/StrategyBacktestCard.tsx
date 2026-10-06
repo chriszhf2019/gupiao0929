@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { StockData } from '../types/stock';
 import { runStrategyBacktest, BacktestStrategyType, BenchmarkBar } from '../utils/backtestEngine';
+import { BACKTEST_BAR_COUNT } from '../utils/symbolCode';
 import {
   Activity,
   TrendingUp,
@@ -40,7 +41,7 @@ export const StrategyBacktestCard: React.FC<StrategyBacktestCardProps> = ({ stoc
 
   useEffect(() => {
     let active = true;
-    fetch(`/api/kline/${BENCHMARK_SYMBOL}?days=120`)
+    fetch(`/api/kline/${BENCHMARK_SYMBOL}?days=${BACKTEST_BAR_COUNT}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((json) => {
         if (active && json?.success && Array.isArray(json.bars)) {
@@ -149,7 +150,7 @@ export const StrategyBacktestCard: React.FC<StrategyBacktestCardProps> = ({ stoc
             {result.totalReturnPercent >= 0 ? '+' : ''}{result.totalReturnPercent}%
           </div>
           <div className="text-[10px] text-[#576F73] dark:text-[#9BB2B4]">
-            年化: <span className="font-mono font-semibold">{result.annualizedReturnPercent}%</span>
+            年化: <span className="font-mono font-semibold">{result.annualizedReliable === false ? '样本不足一年' : `${result.annualizedReturnPercent}%`}</span>
           </div>
         </div>
 
@@ -178,10 +179,10 @@ export const StrategyBacktestCard: React.FC<StrategyBacktestCardProps> = ({ stoc
         <div className="bg-[#F6F7F5] dark:bg-[#141A1B] border border-[#E3E7E1] dark:border-[#2A383A] rounded-xl p-3.5">
           <div className="text-[11px] text-[#576F73] dark:text-[#9BB2B4] mb-1">夏普比率 (Sharpe)</div>
           <div className="text-xl font-black font-mono tabular-nums text-[#3E6F73] dark:text-[#76B4B9]">
-            {result.sharpeRatio}
+            {result.annualizedReliable === false ? '--' : result.sharpeRatio}
           </div>
           <div className="text-[10px] text-[#576F73] dark:text-[#9BB2B4]">
-            日收益年化口径
+            {result.annualizedReliable === false ? '不足一年不计算' : '日收益年化口径'}
           </div>
         </div>
 

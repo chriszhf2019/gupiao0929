@@ -1,3 +1,5 @@
+import { normalizeListing } from './symbolCode';
+
 /**
  * 汇率折算工具
  * 说明：当前为静态近似汇率快照（非实时），用于把跨币种组合的总资产统一折算为人民币。
@@ -20,12 +22,7 @@ export const FX_NOTE = `总额已折算为人民币（静态汇率快照 ${FX_SN
  * 根据股票代码格式推断计价货币：6 位 = 人民币，1~5 位数字 = 港币，字母 = 美元
  */
 export function symbolCurrency(symbol: string): CurrencyCode {
-  const s = (symbol || '').trim().toUpperCase();
-  if (!s) return 'CNY';
-  if (/^\d{6}$/.test(s)) return 'CNY';
-  if (/^\d{1,5}$/.test(s)) return 'HKD';
-  if (/^[A-Z][A-Z0-9.]{0,9}$/.test(s)) return 'USD';
-  return 'CNY';
+  return normalizeListing(symbol)?.currency ?? 'CNY';
 }
 
 /**

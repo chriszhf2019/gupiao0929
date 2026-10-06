@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { StockData, SmartRadarAlertRule } from '../types/stock';
 import { PRESET_STOCKS } from '../data/presetStocks';
 import { stockService } from '../services/stockService';
+import { usePortfolio } from '../context/PortfolioContext';
+import { VaultPasswordGate } from './portfolio/VaultPasswordGate';
 import {
   Bell,
   BellRing,
@@ -25,45 +27,13 @@ interface SmartRadarModalProps {
   onSelectStock: (symbol: string) => void;
 }
 
-const RADAR_STORAGE_KEY = 'zane_smart_radar_rules_v1';
-
 export const SmartRadarModal: React.FC<SmartRadarModalProps> = ({
   isOpen,
   onClose,
   currentStock,
   onSelectStock,
 }) => {
-  const [rules, setRules] = useState<SmartRadarAlertRule[]>(() => {
-    try {
-      const saved = localStorage.getItem(RADAR_STORAGE_KEY);
-      if (saved) return JSON.parse(saved);
-    } catch {
-      // ignore
-    }
-    // 默认内置两条实战监控规则样例（状态为监控中，由轮询引擎实时比价触发）
-    return [
-      {
-        id: 'rule_default_1',
-        symbol: '600519',
-        stockName: '贵州茅台',
-        triggerType: 'safety_margin_reached',
-        title: '安全边际深度建仓线',
-        conditionDescription: '现价接近或低于内在价值折价 20% (¥1420.00)',
-        targetPrice: 1420.0,
-        currentStatus: 'monitoring',
-      },
-      {
-        id: 'rule_default_2',
-        symbol: '300750',
-        stockName: '宁德时代',
-        triggerType: 'ma20_pullback_stable',
-        title: '20日均线回踩企稳信号',
-        conditionDescription: '股价回踩 MA20 支撑线且成交量缩窄',
-        targetPrice: 192.0,
-        currentStatus: 'monitoring',
-      },
-    ];
-  });
+  const { status, radarRules: rules, setRadarRules: setRules, error: vaultError, unlock, setup, reset } = usePortfolio();
 
   const [selectedType, setSelectedType] = useState<SmartRadarAlertRule['triggerType']>('safety_margin_reached');
   const [customPrice, setCustomPrice] = useState<number>(
@@ -79,16 +49,9 @@ export const SmartRadarModal: React.FC<SmartRadarModalProps> = ({
     rulesRef.current = rules;
   }, [rules]);
 
+  // 真实预警引擎：每 30 秒拉取实时价并与目标价比对，命中即置为 triggered 并推送浏览器通知
   useEffect(() => {
-    try {
-      localStorage.setItem(RADAR_STORAGE_KEY, JSON.stringify(rules));
-    } catch {
-      // ignore
-    }
-  }, [rules]);
-
-  // ★ 真实预警引擎：每 30 秒拉取实时价并与目标价比对，命中即置为 triggered 并推送浏览器通知
-  useEffect(() => {
+    if (status !== 'ready') return;
     if (rulesRef.current.length === 0) return;
     let active = true;
 
@@ -149,9 +112,20 @@ export const SmartRadarModal: React.FC<SmartRadarModalProps> = ({
       active = false;
       clearInterval(timer);
     };
-  }, []);
+  }, [status]);
 
   if (!isOpen) return null;
+
+  if (status !== 'ready') {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
+        <div>
+          <button onClick={onClose} className="mb-2 text-xs text-white">关闭</button>
+          <VaultPasswordGate status={status} error={vaultError} onUnlock={unlock} onSetup={setup} onReset={reset} />
+        </div>
+      </div>
+    );
+  }
 
   const handleAddRule = () => {
     let title = '安全边际买入触发线';

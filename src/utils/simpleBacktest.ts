@@ -3,7 +3,8 @@ export interface SimpleBacktestResult {
   note?: string;
   buyHoldReturnPercent: number; // 区间买入持有收益
   strategyReturnPercent: number; // MA20 交叉策略收益
-  annualizedReturnPercent: number; // 策略年化
+  annualizedReturnPercent: number; // 策略年化；样本不足一年时为 0
+  annualizedReliable?: boolean;
   maxDrawdownPercent: number; // 策略最大回撤
   totalTrades: number; // 平仓交易次数
   winRatePercent: number; // 胜率
@@ -48,6 +49,7 @@ export function runSimpleBacktest(
     buyHoldReturnPercent: 0,
     strategyReturnPercent: 0,
     annualizedReturnPercent: 0,
+    annualizedReliable: false,
     maxDrawdownPercent: 0,
     totalTrades: 0,
     winRatePercent: 0,
@@ -123,13 +125,16 @@ export function runSimpleBacktest(
   const first = new Date(bars[0].date).getTime();
   const last = new Date(bars[bars.length - 1].date).getTime();
   const calendarDays = Number.isFinite(first) && Number.isFinite(last) && last > first ? Math.round((last - first) / 86400000) : bars.length;
-  const annualized = calendarDays > 0 ? (Math.pow(final / 100000, 365 / calendarDays) - 1) * 100 : 0;
+  const annualizedReliable = calendarDays >= 365;
+  const annualized = annualizedReliable && calendarDays > 0 ? (Math.pow(final / 100000, 365 / calendarDays) - 1) * 100 : 0;
 
   return {
     dataQuality: 'real',
+    note: annualizedReliable ? undefined : '样本短于一年，只展示区间收益，不年化。',
     buyHoldReturnPercent: Number(buyHold.toFixed(2)),
     strategyReturnPercent: Number(strategyReturn.toFixed(2)),
     annualizedReturnPercent: Number(annualized.toFixed(2)),
+    annualizedReliable,
     maxDrawdownPercent: Number(maxDd.toFixed(2)),
     totalTrades: trades,
     winRatePercent: trades > 0 ? Number(((wins / trades) * 100).toFixed(1)) : 0,

@@ -7,7 +7,10 @@ export interface FinancialYear {
   netMargin: number; // %
   roe: number; // %
   debtToAsset: number; // %
-  freeCashFlow: number; // 亿元
+  freeCashFlow: number; // 经营现金流净额（亿元）。字段名沿用历史命名，与 operatingCashFlow 相同。
+  operatingCashFlow?: number; // 经营现金流净额（亿元），与 freeCashFlow 同值。
+  capitalExpenditure?: number; // 购建长期资产支付的现金（亿元，正数表示流出）。
+  freeCashFlowToEquity?: number; // 自由现金流 = 经营现金流 − 资本开支。缺资本开支时不填。
   // —— 资产负债表科目（亿元，来自东财/腾讯真实披露；缺失时用于 Beneish/Z-Score 的诚实降级）——
   receivables?: number; // 应收账款
   totalAssets?: number; // 总资产
@@ -188,6 +191,7 @@ export interface TrackedStockItem {
   alertsEnabled: boolean;
   notes: TrackingLogNote[];
   upcomingEvents: TrackingEvent[];
+  strategyOutlook?: StrategyOutlook;
 }
 
 // --- 深度探索 (Deep Exploration) ---
@@ -220,7 +224,7 @@ export interface PorterForces {
   threatOfNewEntrants: { level: 'low' | 'medium' | 'high'; score: number; desc: string };
   threatOfSubstitutes: { level: 'low' | 'medium' | 'high'; score: number; desc: string };
   competitiveRivalry: { level: 'low' | 'medium' | 'high'; score: number; desc: string };
-  overallMoatRating: 'Wide Moat' | 'Narrow Moat' | 'No Moat';
+  overallMoatRating: 'Wide Moat' | 'Narrow Moat' | 'No Moat' | 'Unrated';
   moatTrend: 'Widening' | 'Stable' | 'Narrowing';
   moatSources: string[];
 }
@@ -276,7 +280,7 @@ export interface EmotionalExplosion {
 
 export interface RevenueSegmentBreakdown {
   segment: string;
-  percentage: number;
+  percentage: number | null;
   amount: string;
   isRealCommercial: boolean; // 是否是真实工业/商业落地产线
   note: string;
@@ -285,7 +289,7 @@ export interface RevenueSegmentBreakdown {
 export interface ValuationContrastData {
   marketCap: string; // 估值/市值
   realCommercialRevenue: string; // 真实产线/商业化收入
-  realSharePercent: number; // 真实收入占比 %
+  realSharePercent: number | null; // 真实收入占比 %；未计算时为 null
   bubbleMultiple: string; // 溢价/泡沫倍数
   conclusion: string; // 穿透定性结论
 }
@@ -426,6 +430,16 @@ export interface StrategyFilterRule {
   rationale: string; // 指标设计初衷
 }
 
+export interface StrategyOutlook {
+  basis: 'scenario' | 'unavailable';
+  strategyName?: string;
+  bearPrice: number | null;
+  basePrice: number | null;
+  bullPrice: number | null;
+  weightedPrice: number | null;
+  note: string;
+}
+
 export interface StrategyCandidateMatch {
   symbol: string;
   name: string;
@@ -441,6 +455,20 @@ export interface StrategyCandidateMatch {
     pePercentile: number;
     dividendYield?: number;
   };
+  outlook: StrategyOutlook;
+}
+
+export interface SnapshotCandidate {
+  symbol: string;
+  name: string;
+  industry: string;
+  price: number;
+  pe: number;
+  pb: number;
+  roe: number;
+  marketCapYi: number;
+  matchScore: number;
+  reasons: string[];
 }
 
 export interface AIStockStrategy {
@@ -526,6 +554,7 @@ export interface StrategyBacktestResult {
   insufficientData?: boolean; // 真实 K 线不足，无法回测
   insufficientReason?: string;
   costNote?: string; // 交易成本假设说明
+  annualizedReliable?: boolean; // 样本短于一年时为 false，年化收益与夏普不应展示
   performanceSeries: BacktestPerformancePoint[];
   tradeSignalsSummary: {
     date: string;
@@ -659,6 +688,7 @@ export interface ScenarioValuationModel {
   };
   probabilityWeightedPrice: number; // 概率加权公允价 (Bear 25% + Base 50% + Bull 25%)
   riskRewardRatio: number;          // 上行潜力 / 下行风险比率
+  assumptionNote?: string;          // 基准增速与退出 PE 的来源说明
 }
 
 // --- 个人投资精准决策与复盘档案 (Personal Investment Decision Ledger & Memo) ---

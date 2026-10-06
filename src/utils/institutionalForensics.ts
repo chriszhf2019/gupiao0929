@@ -1,4 +1,5 @@
 import { StockData, ForensicForensicsResult, ScenarioValuationModel, PositionSizingResult } from '../types/stock';
+import { isFinancialSector } from './fundamentalProfile';
 
 function buildInsufficientResult(stock: StockData): ForensicForensicsResult {
   return {
@@ -116,7 +117,7 @@ export function calculateBeneishAndAltman(stock: StockData): ForensicForensicsRe
 
   return {
     dataQuality: 'real',
-    dataQualityNote: '基于真实资产负债表科目（应收账款/流动资产/流动负债/留存收益/总资产）计算。',
+    dataQualityNote: '基于真实资产负债表科目计算。M-Score 为五变量方程（DSRI/GMI/AQI/SGI/TATA），LVGI 只展示、不进入公式。TATA 用净利润减经营现金流，不是自由现金流。Z-Score 的 X3 用净利润近似 EBIT，X4 用账面权益/负债并封顶 4，这是制造业近似，不适用于银行。',
     mScore,
     mScoreThreshold: -1.78,
     isManipulationRiskHigh,
@@ -137,35 +138,88 @@ export function calculateBeneishAndAltman(stock: StockData): ForensicForensicsRe
   };
 }
 
+export interface ScenarioAssumptions {
+  cagr: number;
+  exitPe: number;
+  basis: string;
+}
+
+/** 基准增速取历史营收复合增速，退出 PE 取当前 PE，两者都限制在可解释区间。 */
+export function inferScenarioAssumptions(stock: StockData): ScenarioAssumptions {
+  const history = (stock.financialHistory || []).filter((year) => year.revenue > 0);
+  let cagr = 8;
+  let basis = '历史营收不足两年，基准增速用 8%';
+  if (history.length >= 2) {
+    const first = history[0];
+    const last = history[history.length - 1];
+    const years = Math.max(1, history.length - 1);
+    if (first.revenue > 0 && last.revenue > 0) {
+      const raw = (Math.pow(last.revenue / first.revenue, 1 / years) - 1) * 100;
+      cagr = Math.max(-10, Math.min(35, Number(raw.toFixed(1))));
+      basis = `近 ${years} 年营收复合增速 ${cagr}%`;
+    }
+  }
+  const rawPe = stock.valuation.peTTM > 0 ? stock.valuation.peTTM : stock.valuation.pe5YearAvg;
+  const exitPe = Math.max(10, Math.min(60, Number((rawPe || 20).toFixed(1))));
+  return {
+    cagr,
+    exitPe,
+    basis: `${basis}，退出 PE 取当前 ${exitPe} 倍（限制在 10–60）`,
+  };
+}
+
+function flatScenario(stock: StockData, note: string): ScenarioValuationModel {
+  const price = stock.currentPrice;
+  const blank = { cagr3Y: 0, terminalPe: 0, fairValue: price, upsideDownside: 0 };
+  return {
+    bear: { name: '悲观情景 (Bear Case)', ...blank },
+    base: { name: '中性基准 (Base Case)', ...blank },
+    bull: { name: '乐观情景 (Bull Case)', ...blank },
+    probabilityWeightedPrice: price,
+    riskRewardRatio: 0,
+    assumptionNote: note,
+  };
+}
+
 /**
  * 动态多情景敏感性估值引擎 (Bear / Base / Bull)
+ * 未传入参数时，用历史营收复合增速和当前 PE 作为基准。
  */
 export function calculateScenarioValuation(
   stock: StockData,
-  baseCagr = 12,
-  basePe = 25
+  baseCagr?: number,
+  basePe?: number
 ): ScenarioValuationModel {
+  if (isFinancialSector(stock)) {
+    return flatScenario(stock, '银行、保险、证券不用工业企业的盈利增速外推，这里不给三年目标价。');
+  }
+
+  const inferred = inferScenarioAssumptions(stock);
+  const cagr = baseCagr ?? inferred.cagr;
+  const exitPe = basePe ?? inferred.exitPe;
   const currentPrice = stock.currentPrice;
-  const history = stock.financialHistory;
-  const latestNetProfit = history[history.length - 1].netProfit;
+  const history = stock.financialHistory || [];
+  const latestNetProfit = history.length > 0 ? history[history.length - 1].netProfit : 0;
+  if (!history.length || latestNetProfit <= 0 || currentPrice <= 0) {
+    return flatScenario(stock, '最近一期净利润不为正或缺少价格，三情景无法外推，公允价值暂记为现价。');
+  }
 
   // 1. 基准情景 (Base)
-  const baseProfit3Y = latestNetProfit * Math.pow(1 + baseCagr / 100, 3);
-  // 假定每股收益按同比例扩张
-  const currentPe = stock.valuation.peTTM || 20;
-  const baseFairValue = Number((currentPrice * (baseProfit3Y / latestNetProfit) * (basePe / currentPe)).toFixed(2));
+  const baseProfit3Y = latestNetProfit * Math.pow(1 + cagr / 100, 3);
+  const currentPe = stock.valuation.peTTM || exitPe || 20;
+  const baseFairValue = Number((currentPrice * (baseProfit3Y / latestNetProfit) * (exitPe / currentPe)).toFixed(2));
   const baseUpside = Number((((baseFairValue - currentPrice) / currentPrice) * 100).toFixed(1));
 
-  // 2. 悲观情景 (Bear): 增长降速 40%，估值乘数下修 25%
-  const bearCagr = Math.max(Number((baseCagr * 0.4).toFixed(1)), -5);
-  const bearPe = Math.max(Number((basePe * 0.75).toFixed(1)), 10);
+  // 2. 悲观情景：增速降为基准的 60%（降速 40%），估值乘数下修 25%
+  const bearCagr = Math.max(Number((cagr * 0.6).toFixed(1)), -5);
+  const bearPe = Math.max(Number((exitPe * 0.75).toFixed(1)), 10);
   const bearProfit3Y = latestNetProfit * Math.pow(1 + bearCagr / 100, 3);
   const bearFairValue = Number((currentPrice * (bearProfit3Y / latestNetProfit) * (bearPe / currentPe)).toFixed(2));
   const bearUpside = Number((((bearFairValue - currentPrice) / currentPrice) * 100).toFixed(1));
 
-  // 3. 乐观情景 (Bull): 超预期加速 40%，估值乘数扩张 25%
-  const bullCagr = Number((baseCagr * 1.45).toFixed(1));
-  const bullPe = Number((basePe * 1.25).toFixed(1));
+  // 3. 乐观情景：增速升为基准的 140%（加速 40%），估值乘数扩张 25%
+  const bullCagr = Number((cagr * 1.4).toFixed(1));
+  const bullPe = Number((exitPe * 1.25).toFixed(1));
   const bullProfit3Y = latestNetProfit * Math.pow(1 + bullCagr / 100, 3);
   const bullFairValue = Number((currentPrice * (bullProfit3Y / latestNetProfit) * (bullPe / currentPe)).toFixed(2));
   const bullUpside = Number((((bullFairValue - currentPrice) / currentPrice) * 100).toFixed(1));
@@ -189,8 +243,8 @@ export function calculateScenarioValuation(
     },
     base: {
       name: '中性基准 (Base Case)',
-      cagr3Y: baseCagr,
-      terminalPe: basePe,
+      cagr3Y: cagr,
+      terminalPe: exitPe,
       fairValue: baseFairValue,
       upsideDownside: baseUpside,
     },
@@ -203,6 +257,7 @@ export function calculateScenarioValuation(
     },
     probabilityWeightedPrice,
     riskRewardRatio,
+    assumptionNote: inferred.basis,
   };
 }
 

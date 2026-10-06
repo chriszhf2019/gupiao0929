@@ -87,7 +87,7 @@ export const ExtremeDataSection: React.FC<ExtremeDataSectionProps> = ({
             <span>穿透业务收入结构（真实工业复购 vs 关联/概念/补贴）</span>
             {valuationContrast && (
               <span className="text-rose-400 font-semibold text-[11px]">
-                真实商业占比：{valuationContrast.realSharePercent}%
+                真实商业占比：{valuationContrast.realSharePercent == null ? '未披露' : `${valuationContrast.realSharePercent}%`}
               </span>
             )}
           </div>
@@ -118,7 +118,7 @@ export const ExtremeDataSection: React.FC<ExtremeDataSectionProps> = ({
                   <p className="text-[11px] opacity-80">{item.note}</p>
                 </div>
                 <div className="text-right shrink-0">
-                  <div className="text-base font-black text-white">{item.percentage}%</div>
+                  <div className="text-base font-black text-white">{item.percentage == null ? '未披露' : `${item.percentage}%`}</div>
                   <div className="text-[10px] opacity-70">{item.amount}</div>
                 </div>
               </div>

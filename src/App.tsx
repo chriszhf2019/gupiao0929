@@ -1,5 +1,6 @@
-import React, { useState, useEffect, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import { WorkbenchView } from './types/stock';
+import { buildWorkbenchPath, parseWorkbenchPath } from './utils/workbenchPath';
 import { useStockData } from './hooks/useStockData';
 import { Header } from './components/Header';
 import { PresetSelector } from './components/PresetSelector';
@@ -54,7 +55,8 @@ function ViewLoadingFallback() {
 }
 
 export default function App() {
-  const [currentView, setCurrentView] = useState<WorkbenchView>('five-step');
+  const initialRoute = parseWorkbenchPath(window.location.pathname);
+  const [currentView, setCurrentView] = useState<WorkbenchView>(initialRoute.view);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const saved = localStorage.getItem('zane_theme');
     return saved === 'dark' ? 'dark' : 'light';
@@ -87,7 +89,31 @@ export default function App() {
     macroSlider,
     setMacroSlider,
     selectSymbol,
-  } = useStockData('600519');
+  } = useStockData(initialRoute.symbol || '600519');
+
+  const navigate = useCallback((view: WorkbenchView, symbol?: string) => {
+    const nextSymbol = (symbol || currentSymbol).trim().toUpperCase();
+    if (symbol) selectSymbol(nextSymbol);
+    setCurrentView(view);
+    const path = buildWorkbenchPath(view, nextSymbol);
+    if (window.location.pathname !== path) {
+      window.history.pushState(null, '', path);
+    }
+  }, [currentSymbol, selectSymbol]);
+
+  useEffect(() => {
+    const path = buildWorkbenchPath(currentView, currentSymbol);
+    if (window.location.pathname !== path) {
+      window.history.replaceState(null, '', path);
+    }
+    const onPop = () => {
+      const next = parseWorkbenchPath(window.location.pathname);
+      setCurrentView(next.view);
+      if (next.symbol) selectSymbol(next.symbol);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, [currentSymbol, currentView, selectSymbol]);
 
   const [activeStep, setActiveStep] = useState<number>(1);
   const [isAIDeepScanOpen, setIsAIDeepScanOpen] = useState<boolean>(false);
@@ -99,18 +125,17 @@ export default function App() {
   const [isDecisionLedgerOpen, setIsDecisionLedgerOpen] = useState<boolean>(false);
   const [isDecisionLedgerNewTrigger, setIsDecisionLedgerNewTrigger] = useState<boolean>(false);
   const [screenerSymbols, setScreenerSymbols] = useState<string[] | null>(null);
+  const [strategySeed, setStrategySeed] = useState<string | null>(null);
 
   const handleSearchSymbol = (sym: string) => {
     const upper = sym.trim().toUpperCase();
     if (upper) {
-      selectSymbol(upper);
-      setCurrentView('five-step');
+      navigate('five-step', upper);
     }
   };
 
   const handleSelectStockFromWatchlist = (sym: string) => {
-    selectSymbol(sym);
-    setCurrentView('five-step');
+    navigate('five-step', sym);
   };
 
   return (
@@ -137,17 +162,33 @@ export default function App() {
           setIsDecisionLedgerOpen(true);
         }}
         currentView={currentView}
-        onSelectView={(view) => setCurrentView(view)}
+        onSelectView={(view) => navigate(view)}
         theme={theme}
         onToggleTheme={toggleTheme}
       />
 
       {/* Main Container */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6">
+        {(isStockLoading || stockError) && (
+          <div className={`mb-4 rounded-xl border px-4 py-2 text-xs ${
+            stockError
+              ? 'border-[#A84A3E]/40 bg-[#A84A3E]/10 text-[#7D3228] dark:text-[#E2897E]'
+              : 'border-[#E3E7E1] dark:border-[#2A383A] bg-white dark:bg-[#1C2426] text-[#576F73] dark:text-[#9BB2B4]'
+          }`}>
+            {stockError ? `行情同步失败：${stockError}` : `正在同步 ${currentSymbol} 的行情与财报…`}
+          </div>
+        )}
         <Suspense fallback={<ViewLoadingFallback />}>
         {/* View 1: Five-Step Deep Dive */}
         {currentView === 'market' && (
-          <MarketDashboardView />
+          <MarketDashboardView
+            onSelectStock={(sym) => navigate('five-step', sym)}
+            onOpenTracking={(sym) => navigate('tracking', sym)}
+            onOpenStrategy={(prompt) => {
+              setStrategySeed(prompt);
+              navigate('strategy');
+            }}
+          />
         )}
 
         {/* View 1: Five-Step Deep Dive */}
@@ -156,7 +197,7 @@ export default function App() {
             {/* Preset Stocks Quick Selection Bar */}
             <PresetSelector
               currentSymbol={currentSymbol}
-              onSelectStock={(sym) => selectSymbol(sym)}
+              onSelectStock={(sym) => navigate('five-step', sym)}
               onCustomSymbolSubmit={handleSearchSymbol}
               onOpenPeerValidator={() => setIsPeerValidatorOpen(true)}
               onOpenPortfolioHealth={() => setIsPortfolioHealthOpen(true)}
@@ -242,7 +283,7 @@ export default function App() {
               </button>
 
               <button
-                onClick={() => setCurrentView('tracking')}
+                onClick={() => navigate('tracking')}
                 className="flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-white dark:bg-[#1C2426] hover:bg-[#ECEFEA] dark:hover:bg-[#253235] border border-[#4A7C6F]/40 text-xs font-semibold text-[#376156] dark:text-[#76B4B9] transition-all cursor-pointer shadow-xs"
               >
                 <span>个股跟踪与买点监控</span>
@@ -250,7 +291,7 @@ export default function App() {
               </button>
 
               <button
-                onClick={() => setCurrentView('index-fund')}
+                onClick={() => navigate('index-fund')}
                 className="flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-white dark:bg-[#1C2426] hover:bg-[#ECEFEA] dark:hover:bg-[#253235] border border-[#76B4B9]/50 text-xs font-semibold text-[#1F3437] dark:text-[#76B4B9] transition-all cursor-pointer shadow-xs"
               >
                 <span>指数优选 (四步法)</span>
@@ -258,7 +299,7 @@ export default function App() {
               </button>
 
               <button
-                onClick={() => setCurrentView('deep-exploration')}
+                onClick={() => navigate('deep-exploration')}
                 className="flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-white dark:bg-[#1C2426] hover:bg-[#ECEFEA] dark:hover:bg-[#253235] border border-[#3E6F73]/40 text-xs font-semibold text-[#2B5458] dark:text-[#76B4B9] transition-all cursor-pointer shadow-xs"
               >
                 <span>深度爆料与利益闭环</span>
@@ -266,7 +307,7 @@ export default function App() {
               </button>
 
               <button
-                onClick={() => setCurrentView('memo')}
+                onClick={() => navigate('memo')}
                 className="flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-white dark:bg-[#1C2426] hover:bg-[#ECEFEA] dark:hover:bg-[#253235] border border-[#E3E7E1] dark:border-[#2A383A] text-xs font-semibold text-[#1F3437] dark:text-[#E5EBEA] transition-all cursor-pointer shadow-xs"
               >
                 <span>投研备忘录与导出</span>
@@ -293,17 +334,9 @@ export default function App() {
         {currentView === 'tracking' && (
           <StockTrackingHub
             currentSymbol={currentSymbol}
-            onSelectStock={(sym) => {
-              selectSymbol(sym);
-            }}
-            onNavigateToFiveStep={(sym) => {
-              selectSymbol(sym);
-              setCurrentView('five-step');
-            }}
-            onNavigateToDeepExplore={(sym) => {
-              selectSymbol(sym);
-              setCurrentView('deep-exploration');
-            }}
+            onSelectStock={(sym) => navigate('tracking', sym)}
+            onNavigateToFiveStep={(sym) => navigate('five-step', sym)}
+            onNavigateToDeepExplore={(sym) => navigate('deep-exploration', sym)}
           />
         )}
 
@@ -311,17 +344,9 @@ export default function App() {
         {currentView === 'deep-exploration' && (
           <DeepExplorationView
             stock={stock}
-            onSelectStock={(sym) => {
-              selectSymbol(sym);
-            }}
-            onNavigateToFiveStep={(sym) => {
-              selectSymbol(sym);
-              setCurrentView('five-step');
-            }}
-            onNavigateToTracking={(sym) => {
-              selectSymbol(sym);
-              setCurrentView('tracking');
-            }}
+            onSelectStock={(sym) => navigate('deep-exploration', sym)}
+            onNavigateToFiveStep={(sym) => navigate('five-step', sym)}
+            onNavigateToTracking={(sym) => navigate('tracking', sym)}
           />
         )}
 
@@ -330,6 +355,7 @@ export default function App() {
           <StockScreenerView
             currentSymbol={currentSymbol}
             onSelectStock={handleSelectStockFromWatchlist}
+            onOpenTracking={(sym) => navigate('tracking', sym)}
             presetSymbols={screenerSymbols}
             onClearPreset={() => setScreenerSymbols(null)}
           />
@@ -338,13 +364,12 @@ export default function App() {
         {/* View: AI 自然语言策略生成器 */}
         {currentView === 'strategy' && (
           <AIStrategyGenerator
-            onSelectStock={(sym) => {
-              selectSymbol(sym);
-              setCurrentView('five-step');
-            }}
+            initialPrompt={strategySeed}
+            onSelectStock={(sym) => navigate('five-step', sym)}
+            onOpenTracking={(sym) => navigate('tracking', sym)}
             onApplyStrategyFilter={(strategy) => {
               setScreenerSymbols(strategy.matchedStocks.map((m) => m.symbol));
-              setCurrentView('watchlist');
+              navigate('watchlist');
             }}
           />
         )}

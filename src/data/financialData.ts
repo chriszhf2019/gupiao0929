@@ -1,4 +1,13 @@
 import { StockData, FinancialYear, FundamentalScan } from '../types/stock';
+import { calculateFundamentalScan } from '../utils/stockCalculator';
+import { normalizeListing } from '../utils/symbolCode';
+import {
+  EastmoneyMainRow,
+  applyOwnerFreeCashFlow,
+  mapEastmoneyAnnualRow,
+  mapTushareAnnualRow,
+  readCashOutflowYuan,
+} from './financialMapping';
 
 const TUSHARE_API = (process.env.TUSHARE_API_URL || 'http://api.tushare.pro').replace(/\/+$/, '');
 const EASTMONEY_API = 'https://datacenter.eastmoney.com/securities/api/data/v1/get';
@@ -16,37 +25,14 @@ function valid(n: number): boolean {
 }
 
 function toTushareCode(symbol: string): string | null {
-  const s = symbol.trim().toUpperCase();
-  if (/^\d{6}$/.test(s)) {
-    const suffix = /^(60|68)/.test(s) ? 'SH' : /^(00|30)/.test(s) ? 'SZ' : /^(8|4)/.test(s) ? 'BJ' : 'SH';
-    return `${s}.${suffix}`;
-  }
-  if (/^\d{1,5}$/.test(s)) {
-    return `${s.padStart(5, '0')}.HK`;
-  }
-  return null;
+  return normalizeListing(symbol)?.tushareCode ?? null;
 }
 
 function toEastmoneySecuCode(symbol: string): string | null {
-  const s = symbol.trim().toUpperCase();
-  if (/^\d{6}$/.test(s)) {
-    const suffix = /^(60|68)/.test(s) ? 'SH' : /^(00|30)/.test(s) ? 'SZ' : /^(8|4)/.test(s) ? 'BJ' : 'SH';
-    return `${s}.${suffix}`;
-  }
-  return null;
+  return normalizeListing(symbol)?.eastmoneySecuCode ?? null;
 }
 
-interface EastmoneyFinanceRow {
-  REPORT_DATE?: string;
-  REPORT_TYPE?: string;
-  TOTALOPERATEREVE?: number | null;
-  PARENTNETPROFIT?: number | null;
-  XSMLL?: number | null;
-  XSJLL?: number | null;
-  ROEJQ?: number | null;
-  ZCFZL?: number | null;
-  NETCASH_OPERATE_PK?: number | null;
-}
+type EastmoneyFinanceRow = EastmoneyMainRow;
 
 interface EastmoneyBalanceRow {
   REPORT_DATE?: string;
@@ -159,28 +145,8 @@ async function fetchEastmoneyFinancialYears(secuCode: string): Promise<Financial
 
     const years: FinancialYear[] = [];
     for (const row of annualRows) {
-      const reportDate = String(row.REPORT_DATE || '').slice(0, 10).replace(/-/g, '');
-      const revenue = Number(row.TOTALOPERATEREVE) || 0;
-      const netProfit = Number(row.PARENTNETPROFIT) || 0;
-      const grossMargin = Number(row.XSMLL) || 0;
-      const netMargin = Number(row.XSJLL) || 0;
-      const roe = Number(row.ROEJQ) || 0;
-      const debtToAsset = Number(row.ZCFZL) || 0;
-      const freeCashFlow = Number(row.NETCASH_OPERATE_PK) || 0;
-
-      if (revenue <= 0 || !reportDate) continue;
-
-      years.push({
-        year: reportDate.slice(0, 4),
-        reportDate,
-        revenue: round2(revenue / 1e8),
-        netProfit: round2(netProfit / 1e8),
-        grossMargin: round1(grossMargin),
-        netMargin: round1(netMargin),
-        roe: round1(roe),
-        debtToAsset: round1(debtToAsset),
-        freeCashFlow: round2(freeCashFlow / 1e8),
-      });
+      const mapped = mapEastmoneyAnnualRow(row);
+      if (mapped) years.push(mapped);
     }
 
     if (years.length < 2) return null;
@@ -203,9 +169,55 @@ async function fetchEastmoneyFinancialYears(secuCode: string): Promise<Financial
       }
     }
 
+    const capexMap = await fetchEastmoneyCapex(secuCode);
+    if (capexMap.size > 0) {
+      for (let i = 0; i < years.length; i++) {
+        const yuan = years[i].reportDate ? capexMap.get(years[i].reportDate!) : undefined;
+        if (yuan != null) years[i] = applyOwnerFreeCashFlow(years[i], yuan);
+      }
+    }
+
     return years;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchEastmoneyCapex(secuCode: string): Promise<Map<string, number>> {
+  const query = new URLSearchParams({
+    reportName: 'RPT_F10_FINANCE_GCASHFLOW',
+    columns: 'ALL',
+    filter: `(SECUCODE="${secuCode}")`,
+    pageNumber: '1',
+    pageSize: '40',
+    sortTypes: '-1',
+    sortColumns: 'REPORT_DATE',
+    source: 'HSF10',
+    client: 'PC',
+  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 6000);
+  try {
+    const response = await fetch(`${EASTMONEY_API}?${query.toString()}`, {
+      signal: controller.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' },
+    });
+    if (!response.ok) return new Map();
+    const json = await response.json();
+    const rows: Record<string, unknown>[] = json?.result?.data;
+    if (!Array.isArray(rows)) return new Map();
+    const map = new Map<string, number>();
+    for (const row of rows) {
+      const reportDate = String(row.REPORT_DATE || '').slice(0, 10).replace(/-/g, '');
+      if (!/^\d{4}1231$/.test(reportDate)) continue;
+      const yuan = readCashOutflowYuan(row);
+      if (yuan != null) map.set(reportDate, yuan);
+    }
+    return map;
+  } catch {
+    return new Map();
   } finally {
     clearTimeout(timer);
   }
@@ -254,7 +266,7 @@ async function fetchFinancialYears(tsCode: string): Promise<FinancialYear[] | nu
   const [income, balance, cash] = await Promise.all([
     callTushare('income', { ts_code: tsCode }, 'ts_code,end_date,total_revenue,revenue,oper_cost,n_income,n_income_attr_p'),
     callTushare('balancesheet', { ts_code: tsCode }, 'ts_code,end_date,total_assets,total_liab,total_hldr_eqy_exc_min_int,accounts_receiv,total_cur_assets,total_cur_liab,fix_assets,retained_earnings'),
-    callTushare('cashflow', { ts_code: tsCode }, 'ts_code,end_date,n_cashflow_act'),
+    callTushare('cashflow', { ts_code: tsCode }, 'ts_code,end_date,n_cashflow_act,c_pay_acq_const_fiolta'),
   ]);
 
   const annualIncome = income
@@ -270,35 +282,8 @@ async function fetchFinancialYears(tsCode: string): Promise<FinancialYear[] | nu
     const bal = balanceByDate.get(String(inc.end_date));
     if (!bal) continue;
 
-    const revenue = Number(inc.revenue) || Number(inc.total_revenue) || 0;
-    const operCost = Number(inc.oper_cost) || 0;
-    const netIncome = Number(inc.n_income_attr_p) || Number(inc.n_income) || 0;
-    const totalAssets = Number(bal.total_assets) || 0;
-    const totalLiab = Number(bal.total_liab) || 0;
-    const equity = Number(bal.total_hldr_eqy_exc_min_int) || 0;
-    const freeCashFlow = Number(cashByDate.get(String(inc.end_date))?.n_cashflow_act) || 0;
-
-    if (revenue <= 0 || totalAssets <= 0) continue;
-
-    years.push({
-      year: String(inc.end_date).slice(0, 4),
-      reportDate: String(inc.end_date),
-      revenue: round2(revenue / 1e8),
-      netProfit: round2(netIncome / 1e8),
-      grossMargin: operCost > 0 ? round1(((revenue - operCost) / revenue) * 100) : 0,
-      netMargin: round1((netIncome / revenue) * 100),
-      roe: equity > 0 ? round1((netIncome / equity) * 100) : 0,
-      debtToAsset: round1((totalLiab / totalAssets) * 100),
-      freeCashFlow: round2(freeCashFlow / 1e8),
-      receivables: round2((Number(bal.accounts_receiv) || 0) / 1e8),
-      totalAssets: round2(totalAssets / 1e8),
-      currentAssets: round2((Number(bal.total_cur_assets) || 0) / 1e8),
-      currentLiabilities: round2((Number(bal.total_cur_liab) || 0) / 1e8),
-      fixedAssets: round2((Number(bal.fix_assets) || 0) / 1e8),
-      totalLiabilities: round2(totalLiab / 1e8),
-      totalEquity: round2(equity / 1e8),
-      retainedEarnings: round2((Number(bal.retained_earnings) || 0) / 1e8),
-    });
+    const mapped = mapTushareAnnualRow(inc, bal, cashByDate.get(String(inc.end_date)));
+    if (mapped) years.push(mapped);
   }
 
   return years.length >= 2 ? years : null;
@@ -315,39 +300,19 @@ function buildFundamentalScan(base: StockData, years: FinancialYear[]): Fundamen
   const revenueGrowthValue =
     prev && prev.revenue > 0 ? round1(((latest.revenue - prev.revenue) / prev.revenue) * 100) : base.fundamentals.revenueGrowthValue;
   const cashFlowValue = latest.freeCashFlow;
-
-  const passes = [
-    grossMarginValue >= 30,
-    netMarginValue >= 10,
-    debtRatioValue <= 60,
-    roeValue >= 15,
-    revenueGrowthValue >= 5,
-    cashFlowValue > 0,
-  ].filter(Boolean).length;
-  const score = Math.round((passes / 6) * 100);
-  let grade: FundamentalScan['grade'] = 'C';
-  if (score >= 90) grade = 'A+';
-  else if (score >= 75) grade = 'A';
-  else if (score >= 60) grade = 'B';
-  else if (score >= 40) grade = 'C';
-  else grade = 'D';
-
-  return {
-    grossMarginPass: grossMarginValue >= 30,
-    grossMarginValue: round1(grossMarginValue),
-    netMarginPass: netMarginValue >= 10,
-    netMarginValue: round1(netMarginValue),
-    debtRatioPass: debtRatioValue <= 60,
-    debtRatioValue: round1(debtRatioValue),
-    roePass: roeValue >= 15,
-    roeValue: round1(roeValue),
-    revenueGrowthPass: revenueGrowthValue >= 5,
-    revenueGrowthValue: round1(revenueGrowthValue),
-    cashFlowPass: cashFlowValue > 0,
-    cashFlowValue: round2(cashFlowValue),
-    overallScore: score,
-    grade,
+  const drafted: StockData = {
+    ...base,
+    fundamentals: {
+      ...base.fundamentals,
+      grossMarginValue: round1(grossMarginValue),
+      netMarginValue: round1(netMarginValue),
+      debtRatioValue: round1(debtRatioValue),
+      roeValue: round1(roeValue),
+      revenueGrowthValue: round1(revenueGrowthValue),
+      cashFlowValue: round2(cashFlowValue),
+    },
   };
+  return calculateFundamentalScan(drafted);
 }
 
 export async function enrichWithFinancials(stock: StockData): Promise<StockData> {

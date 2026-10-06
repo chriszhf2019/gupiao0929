@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { StockData } from '../types/stock';
 import { analyzeTrendForwardReturns, TrendForwardResult } from '../utils/trendForwardReturns';
+import { BACKTEST_BAR_COUNT } from '../utils/symbolCode';
 import { Activity, Loader2, TrendingUp, TrendingDown, Info } from 'lucide-react';
 
 interface TrendForwardCardProps {
@@ -19,7 +20,7 @@ export const TrendForwardCard: React.FC<TrendForwardCardProps> = ({ stock }) => 
   useEffect(() => {
     let active = true;
     setLoading(true);
-    fetch(`/api/kline/${stock.symbol}?days=250`)
+    fetch(`/api/kline/${stock.symbol}?days=${BACKTEST_BAR_COUNT}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((json: KlineResponse | null) => {
         if (!active) return;

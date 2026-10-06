@@ -1,5 +1,6 @@
 import { PortfolioHoldingInput, PortfolioHealthReport, StockData } from '../types/stock';
 import { PRESET_STOCKS } from '../data/presetStocks';
+import { isFinancialSector } from './fundamentalProfile';
 
 /**
  * 针对用户持仓组合进行全方位健康度与雷区排查体检
@@ -72,7 +73,7 @@ export function auditPortfolioHealth(
       cashFlowDeficitCount++;
     }
 
-    const isHighDebt = stock.fundamentals.debtRatioValue > 65;
+    const isHighDebt = !isFinancialSector(stock) && stock.fundamentals.debtRatioValue > 65;
     const isOvervalued = pePercentile > 75;
 
     let healthLevel: 'healthy' | 'warning' | 'critical_danger' = 'healthy';

@@ -47,19 +47,26 @@ cp .env.example .env
 npm run akshare            # http://127.0.0.1:8765
 
 # 终端 2：主应用
-npm run dev                # 默认 http://localhost:3999
+npm run dev                # 默认 http://localhost:3000
 ```
 
-> 端口冲突时改 `.env` 里的 `PORT`。本地 3000/3100 常被占用，默认已改为 3999。
+> 端口由 `.env` 的 `PORT` 决定，未设置时为 3000。
 
 ### 4. 生产部署
 ```bash
+# 服务器环境变量。ACCESS_TOKEN 至少 8 位；未设置时生产进程会直接退出。
+export ACCESS_TOKEN='请换成一串足够长的随机令牌'
+export NODE_ENV=production
+export PORT=3000
+
 npm run build              # 产出 dist/（前端静态 + server.cjs）
-NODE_ENV=production PORT=3999 npm start
+npm start
 ```
-公网部署**务必**：
-- 设置 `ACCESS_TOKEN` + `VITE_ACCESS_TOKEN`（所有 /api 需 Bearer 令牌）
-- 用 Nginx/HTTPS 反向代理，或至少置于内网
+第一次打开页面时输入同一个令牌，它只存在这台浏览器的 localStorage。不要把令牌写进 `VITE_ACCESS_TOKEN` 再构建，否则会进前端包。
+
+公网部署再加两件事：
+- 用 Nginx/HTTPS 反向代理，或只放在内网
+- `ACCESS_TOKEN` 和 DeepSeek 密钥只放在服务器环境变量里，不要提交到仓库
 
 ---
 
@@ -89,7 +96,8 @@ npm test        # vitest 单元测试（36 项：排雷/估值/回测/审计器/
 ---
 
 ## 🔒 安全说明
-- 组合持仓用 PBKDF2(12万迭代) + AES-256-GCM 加密存本地，密码不落盘
+- 组合持仓、决策档案、跟踪列表、买点雷达和荐股记录共用一把密码，PBKDF2(12万迭代) + AES-256-GCM 加密存本地，密码不落盘
+- 工作台地址形如 `/five-step/600519`、`/tracking/600519`，刷新后停在当前页面和代码
 - 所有 /api 支持 Bearer 门禁 + 滑动窗口限流
 - `.env` 已在 .gitignore；**请勿把真实 key 提交/分享**
 
@@ -102,7 +110,8 @@ npm test        # vitest 单元测试（36 项：排雷/估值/回测/审计器/
 
 ## 📦 目录结构（关键）
 ```
-server.ts                    # Express 后端（行情/财报/股东/K线/基金/北向/回测基准/AI 代理）
+server.ts                    # Express 入口（鉴权、限流、静态资源）
+server/routes                # 行情、个股、机构持仓、AI、指数基金路由
 scripts/akshare_server.py    # Python 机构持仓数据服务（公募/社保，可独立运行）
 src/
   components/                # 五大工作台 + 弹窗工具
