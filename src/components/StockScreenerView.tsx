@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { request } from '../services/apiClient';
 import { BatchBacktestPanel } from './BatchBacktestPanel';
+import { VaultPasswordGate } from './portfolio/VaultPasswordGate';
+import { useStrategyTracking } from '../hooks/useStrategyTracking';
 import {
   Search,
   TrendingUp,
@@ -47,6 +49,7 @@ interface ScreenerResponse {
 interface StockScreenerViewProps {
   currentSymbol: string;
   onSelectStock: (symbol: string) => void;
+  onOpenTracking?: (symbol: string) => void;
   presetSymbols?: string[] | null;
   onClearPreset?: () => void;
 }
@@ -79,7 +82,8 @@ function valueSignalOf(i: ScreenerItem): number {
   return Number((earningsYield + roe).toFixed(1));
 }
 
-export const StockScreenerView: React.FC<StockScreenerViewProps> = ({ currentSymbol, onSelectStock, presetSymbols, onClearPreset }) => {
+export const StockScreenerView: React.FC<StockScreenerViewProps> = ({ currentSymbol, onSelectStock, onOpenTracking, presetSymbols, onClearPreset }) => {
+  const tracking = useStrategyTracking(onOpenTracking);
   const [items, setItems] = useState<ScreenerItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -258,6 +262,16 @@ export const StockScreenerView: React.FC<StockScreenerViewProps> = ({ currentSym
 
   return (
     <div className="space-y-5">
+      {tracking.pending && (
+        <VaultPasswordGate
+          status={tracking.vault.status}
+          error={tracking.vault.error}
+          onUnlock={tracking.vault.unlock}
+          onSetup={tracking.vault.setup}
+          onReset={tracking.vault.reset}
+        />
+      )}
+      {tracking.error && <p className="text-xs text-[#A84A3E]">{tracking.error}</p>}
       {/* 标题栏 */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center space-x-3">
@@ -267,7 +281,7 @@ export const StockScreenerView: React.FC<StockScreenerViewProps> = ({ currentSym
           <div>
             <h2 className="text-lg font-serif font-bold text-[#1F3437] dark:text-[#E5EBEA]">全市场选股雷达</h2>
             <p className="text-xs text-[#576F73] dark:text-[#9BB2B4]">
-              沪深京 A 股实时行情快照，支持行业、估值、ROE 与价格筛选，点击「研究」进入五步深度研判
+              沪深京 A 股实时行情快照。研究进入五步研判；预测并跟踪会先取财报情景价，再写入跟踪中心。
             </p>
           </div>
         </div>
@@ -472,12 +486,20 @@ export const StockScreenerView: React.FC<StockScreenerViewProps> = ({ currentSym
                         <td className="py-2.5 text-right font-mono text-[#576F73] dark:text-[#9BB2B4]">{fmtMoneyYi(i.marketCapYi)}</td>
                         <td className="py-2.5 text-right font-mono text-[#576F73] dark:text-[#9BB2B4] hidden lg:table-cell">{fmtNum(i.turnoverRate)}%</td>
                         <td className="py-2.5 pr-4 text-center">
-                          <button
-                            onClick={() => onSelectStock(i.code)}
-                            className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-[#3E6F73]/10 text-[#3E6F73] dark:text-[#76B4B9] hover:bg-[#3E6F73]/20 cursor-pointer"
-                          >
-                            研究
-                          </button>
+                          <div className="inline-flex items-center gap-1">
+                            <button
+                              onClick={() => onSelectStock(i.code)}
+                              className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-[#3E6F73]/10 text-[#3E6F73] dark:text-[#76B4B9] hover:bg-[#3E6F73]/20 cursor-pointer"
+                            >
+                              研究
+                            </button>
+                            <button
+                              onClick={() => tracking.track(i.code, '选股雷达')}
+                              className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-[#1F3437] text-white cursor-pointer"
+                            >
+                              {tracking.busySymbol === i.code ? '写入中' : '预测并跟踪'}
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );

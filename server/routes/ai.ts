@@ -1,7 +1,7 @@
 import express from "express";
 import type { StockData } from "../../src/types/stock.js";
-import { PRESET_STOCKS } from "../../src/data/presetStocks.js";
 import { callDeepSeek, parseJsonResponse, loadCanonicalStock, sanitizeAiReport, clampMacroSlider, type DeepSeekMessage } from "../deepseek.js";
+import { attachPresetMatches } from "../../src/utils/strategyPipeline.js";
 import { buildLocalDeepExploreReport } from "../../src/utils/localDeepExplore.js";
 import { buildUnavailableInvestigativeReport } from "../../src/utils/unavailableInvestigative.js";
 
@@ -363,8 +363,6 @@ export function register(router: express.Router, limits: { aiRateLimit?: express
     const trimmedPrompt = ideaPrompt.trim();
     const apiKey = process.env.DEEPSEEK_API_KEY;
 
-    // 本地多模态选股标的候选池匹配器
-    const availableStocks = Object.values(PRESET_STOCKS);
     const generateLocalFallbackStrategy = (promptText: string) => {
       let styleTag: any = "价值白马";
       let strategyName = "核心资产稳健价值选股策略";
@@ -392,46 +390,7 @@ export function register(router: express.Router, limits: { aiRateLimit?: express
         risk = "中等平衡";
       }
 
-      const matched = availableStocks.map((stock) => {
-        let score = 70;
-        const highlights: string[] = [];
-
-        if (stock.fundamentals.grossMarginValue > 30) {
-          score += 8;
-          highlights.push(`毛利率高达 ${stock.fundamentals.grossMarginValue}% (定价权强)`);
-        }
-        if (stock.fundamentals.roeValue > 15) {
-          score += 10;
-          highlights.push(`ROE达到 ${stock.fundamentals.roeValue}% (股东回报丰厚)`);
-        }
-        if (stock.valuation.historicalPePercentile <= 30) {
-          score += 10;
-          highlights.push(`历史PE分位数仅 ${stock.valuation.historicalPePercentile}% (估值安全边际高)`);
-        }
-        if (stock.fundamentals.debtRatioValue < 50) {
-          score += 5;
-          highlights.push(`负债率仅 ${stock.fundamentals.debtRatioValue}% (资产负债表健康)`);
-        }
-
-        return {
-          symbol: stock.symbol,
-          name: stock.name,
-          market: stock.market,
-          currentPrice: stock.currentPrice,
-          peTTM: stock.peTTM,
-          matchScore: Math.min(score, 99),
-          highlightReasons: highlights.slice(0, 3),
-          metricsSnapshot: {
-            grossMargin: stock.fundamentals.grossMarginValue,
-            roe: stock.fundamentals.roeValue,
-            debtRatio: stock.fundamentals.debtRatioValue,
-            pePercentile: stock.valuation.historicalPePercentile,
-            dividendYield: stock.valuation.dividendYield,
-          },
-        };
-      }).sort((a, b) => b.matchScore - a.matchScore).slice(0, 5);
-
-      return {
+      return attachPresetMatches({
         id: `strat_${Date.now()}`,
         ideaPrompt: promptText,
         strategyName,
@@ -483,9 +442,8 @@ export function register(router: express.Router, limits: { aiRateLimit?: express
           "近 3 年受到证监会或交易所公开立案调查的一票否决",
           "商誉占净资产比例超过 30% 的标的一票否决",
         ],
-        matchedStocks: matched,
         createdAt: new Date().toISOString().split("T")[0],
-      };
+      }, promptText);
     };
 
     try {
@@ -532,12 +490,12 @@ export function register(router: express.Router, limits: { aiRateLimit?: express
       });
 
       const parsed = parseJsonResponse(strategyText);
-      const fullStrategy = {
+      const fullStrategy = attachPresetMatches({
         ...parsed,
         id: `strat_${Date.now()}`,
         ideaPrompt: trimmedPrompt,
         createdAt: new Date().toISOString().split("T")[0],
-      };
+      }, trimmedPrompt);
 
       res.json({ success: true, strategy: fullStrategy });
     } catch (error: any) {

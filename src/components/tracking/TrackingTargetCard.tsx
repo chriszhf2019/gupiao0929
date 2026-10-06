@@ -81,6 +81,19 @@ export function TrackingTargetCard(props: {
                 </div>
               </div>
 
+              {activeTracked.strategyOutlook && (
+                <div className="rounded-xl border border-indigo-500/30 bg-indigo-500/10 px-4 py-3 text-xs text-slate-200">
+                  <div className="font-bold text-indigo-200 mb-1">策略预测 · {activeTracked.strategyOutlook.strategyName}</div>
+                  {activeTracked.strategyOutlook.basePrice != null ? (
+                    <div className="font-mono">
+                      悲观 {activeTracked.strategyOutlook.bearPrice} · 基准 {activeTracked.strategyOutlook.basePrice} · 乐观 {activeTracked.strategyOutlook.bullPrice}
+                    </div>
+                  ) : (
+                    <div>{activeTracked.strategyOutlook.note}</div>
+                  )}
+                </div>
+              )}
+
               {/* Target Price Triggers Config & Status */}
               <div>
                 <div className="flex items-center justify-between mb-3">

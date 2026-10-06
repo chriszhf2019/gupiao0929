@@ -191,6 +191,7 @@ export interface TrackedStockItem {
   alertsEnabled: boolean;
   notes: TrackingLogNote[];
   upcomingEvents: TrackingEvent[];
+  strategyOutlook?: StrategyOutlook;
 }
 
 // --- 深度探索 (Deep Exploration) ---
@@ -429,6 +430,16 @@ export interface StrategyFilterRule {
   rationale: string; // 指标设计初衷
 }
 
+export interface StrategyOutlook {
+  basis: 'scenario' | 'unavailable';
+  strategyName?: string;
+  bearPrice: number | null;
+  basePrice: number | null;
+  bullPrice: number | null;
+  weightedPrice: number | null;
+  note: string;
+}
+
 export interface StrategyCandidateMatch {
   symbol: string;
   name: string;
@@ -444,6 +455,20 @@ export interface StrategyCandidateMatch {
     pePercentile: number;
     dividendYield?: number;
   };
+  outlook: StrategyOutlook;
+}
+
+export interface SnapshotCandidate {
+  symbol: string;
+  name: string;
+  industry: string;
+  price: number;
+  pe: number;
+  pb: number;
+  roe: number;
+  marketCapYi: number;
+  matchScore: number;
+  reasons: string[];
 }
 
 export interface AIStockStrategy {

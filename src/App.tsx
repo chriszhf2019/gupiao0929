@@ -347,6 +347,7 @@ export default function App() {
           <StockScreenerView
             currentSymbol={currentSymbol}
             onSelectStock={handleSelectStockFromWatchlist}
+            onOpenTracking={(sym) => navigate('tracking', sym)}
             presetSymbols={screenerSymbols}
             onClearPreset={() => setScreenerSymbols(null)}
           />
@@ -356,6 +357,7 @@ export default function App() {
         {currentView === 'strategy' && (
           <AIStrategyGenerator
             onSelectStock={(sym) => navigate('five-step', sym)}
+            onOpenTracking={(sym) => navigate('tracking', sym)}
             onApplyStrategyFilter={(strategy) => {
               setScreenerSymbols(strategy.matchedStocks.map((m) => m.symbol));
               navigate('watchlist');
