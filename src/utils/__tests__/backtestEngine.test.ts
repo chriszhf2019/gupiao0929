@@ -33,6 +33,16 @@ describe('runStrategyBacktest 回测引擎', () => {
     }
   });
 
+  it('跨度超过一年的日 K 可以计算年化', () => {
+    const stock = makeStock();
+    const history = makePriceHistory(30, 100);
+    history[0] = { ...history[0], date: '2024-01-02' };
+    history[history.length - 1] = { ...history[history.length - 1], date: '2025-06-02' };
+    stock.priceHistory = history;
+    const result = runStrategyBacktest(stock);
+    expect(result.annualizedReliable).toBe(true);
+  });
+
   it('传入真实基准时标记 benchmarkAvailable 并计算超额收益', () => {
     const stock = makeStock();
     stock.priceHistory = makePriceHistory(30, 100);

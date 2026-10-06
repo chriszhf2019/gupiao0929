@@ -7,7 +7,10 @@ export interface FinancialYear {
   netMargin: number; // %
   roe: number; // %
   debtToAsset: number; // %
-  freeCashFlow: number; // 经营现金流净额（亿元）。字段名沿用历史命名；数据源是现金流量表经营活动现金流，不是扣减资本开支后的自由现金流。
+  freeCashFlow: number; // 经营现金流净额（亿元）。字段名沿用历史命名，与 operatingCashFlow 相同。
+  operatingCashFlow?: number; // 经营现金流净额（亿元），与 freeCashFlow 同值。
+  capitalExpenditure?: number; // 购建长期资产支付的现金（亿元，正数表示流出）。
+  freeCashFlowToEquity?: number; // 自由现金流 = 经营现金流 − 资本开支。缺资本开支时不填。
   // —— 资产负债表科目（亿元，来自东财/腾讯真实披露；缺失时用于 Beneish/Z-Score 的诚实降级）——
   receivables?: number; // 应收账款
   totalAssets?: number; // 总资产
@@ -220,7 +223,7 @@ export interface PorterForces {
   threatOfNewEntrants: { level: 'low' | 'medium' | 'high'; score: number; desc: string };
   threatOfSubstitutes: { level: 'low' | 'medium' | 'high'; score: number; desc: string };
   competitiveRivalry: { level: 'low' | 'medium' | 'high'; score: number; desc: string };
-  overallMoatRating: 'Wide Moat' | 'Narrow Moat' | 'No Moat';
+  overallMoatRating: 'Wide Moat' | 'Narrow Moat' | 'No Moat' | 'Unrated';
   moatTrend: 'Widening' | 'Stable' | 'Narrowing';
   moatSources: string[];
 }
@@ -276,7 +279,7 @@ export interface EmotionalExplosion {
 
 export interface RevenueSegmentBreakdown {
   segment: string;
-  percentage: number;
+  percentage: number | null;
   amount: string;
   isRealCommercial: boolean; // 是否是真实工业/商业落地产线
   note: string;
@@ -285,7 +288,7 @@ export interface RevenueSegmentBreakdown {
 export interface ValuationContrastData {
   marketCap: string; // 估值/市值
   realCommercialRevenue: string; // 真实产线/商业化收入
-  realSharePercent: number; // 真实收入占比 %
+  realSharePercent: number | null; // 真实收入占比 %；未计算时为 null
   bubbleMultiple: string; // 溢价/泡沫倍数
   conclusion: string; // 穿透定性结论
 }

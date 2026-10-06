@@ -3,6 +3,7 @@ import { PRESET_STOCKS, generateStockFallback } from "../../src/data/presetStock
 import { getRealtimeStockData, fetchTencentKline } from "../../src/data/realtimeQuote.js";
 import { enrichWithFinancials } from "../../src/data/financialData.js";
 import { HOT_SYMBOLS } from "../../src/data/hotSymbols.js";
+import { BACKTEST_BAR_COUNT, normalizeListing } from "../../src/utils/symbolCode.js";
 
 export function register(router: express.Router, limits: { aiRateLimit?: express.RequestHandler; deepDiveRateLimit?: express.RequestHandler } = {}) {
   const aiRateLimit = limits.aiRateLimit!;
@@ -79,8 +80,10 @@ export function register(router: express.Router, limits: { aiRateLimit?: express
         return res.json({ success: true, ...cached.data });
       }
 
-      const suffix = /^(60|68)/.test(symbol) ? 'SH' : /^(00|30)/.test(symbol) ? 'SZ' : /^(8|4)/.test(symbol) ? 'BJ' : 'SH';
-      const secuCode = `${symbol}.${suffix}`;
+      const secuCode = normalizeListing(symbol)?.eastmoneySecuCode;
+      if (!secuCode) {
+        return res.status(400).json({ success: false, error: "无法识别的 A 股代码" });
+      }
       const url = `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_F10_EH_FREEHOLDERS&columns=ALL&filter=(${encodeURIComponent(`SECUCODE="${secuCode}"`)})&pageNumber=1&pageSize=20&source=HSF10&client=PC`;
 
       const controller = new AbortController();
@@ -188,19 +191,7 @@ export function register(router: express.Router, limits: { aiRateLimit?: express
   const KLINE_CACHE_TTL_MS = 5 * 60_000;
 
   function toTencentKlineSymbol(raw: string): string | null {
-    const s = raw.trim().toLowerCase().replace(/\s+/g, '');
-    if (!s) return null;
-    if (/^(sh|sz|bj)\d{6}$/.test(s) || /^hk\d{5}$/.test(s) || /^us[A-Za-z.]+$/.test(s)) {
-      return s;
-    }
-    if (/^\d{6}$/.test(s)) {
-      const prefix = /^(60|68)/.test(s) ? 'sh' : /^(00|30)/.test(s) ? 'sz' : /^(8|4)/.test(s) ? 'bj' : 'sh';
-      return `${prefix}${s}`;
-    }
-    if (/^\d{1,5}$/.test(s)) {
-      return `hk${s.padStart(5, '0')}`;
-    }
-    return null;
+    return normalizeListing(raw)?.tencentSymbol ?? null;
   }
 
   router.get("/kline/:symbol", async (req, res) => {
@@ -208,7 +199,7 @@ export function register(router: express.Router, limits: { aiRateLimit?: express
     if (!tsSymbol) {
       return res.status(400).json({ success: false, error: "无法识别的代码格式" });
     }
-    const days = Math.min(Math.max(Number(req.query.days) || 120, 20), 500);
+    const days = Math.min(Math.max(Number(req.query.days) || BACKTEST_BAR_COUNT, 20), 800);
     const key = `${tsSymbol}:${days}`;
 
     try {

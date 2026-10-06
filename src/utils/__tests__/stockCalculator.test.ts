@@ -57,15 +57,19 @@ describe('generateLocalReport 本地兜底文案', () => {
 });
 
 describe('computeFiveStepSummary 五步综合评分', () => {
-  it('宏观点数为滑块×2（满分20）', () => {
-    const summary = computeFiveStepSummary(makeStock(), 5);
-    expect(summary.macroPts).toBe(10);
+  it('宏观分取政策催化分，滑块不改总分', () => {
+    const stock = makeStock();
+    stock.macro.policyCatalystScore = 5;
+    stock.macro.industryStage = 'Mature Cash Cow';
+    const low = computeFiveStepSummary(stock, 1);
+    const high = computeFiveStepSummary(stock, 10);
+    expect(low.macroPts).toBe(10);
+    expect(high.totalScore).toBe(low.totalScore);
   });
 
   it('verdict 档位映射：>=85 strong', () => {
-    // 构造一个高分公司：宏观拉满 + 基本面满分 + 估值极低 + 金叉上升
     const stock = makeStock();
-    const summary = computeFiveStepSummary(stock, 10); // 宏观20 + 基本面30 + 估值25 + 技术25 = 100
+    const summary = computeFiveStepSummary(stock, 10);
     expect(summary.totalScore).toBeGreaterThanOrEqual(85);
     expect(summary.verdictLevel).toBe('strong');
     expect(summary.verdict).toBe('强烈推荐建仓');

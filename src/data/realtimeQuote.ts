@@ -1,5 +1,6 @@
 import { StockData, PricePoint } from '../types/stock';
 import { PRESET_STOCKS, generateStockFallback } from './presetStocks';
+import { BACKTEST_BAR_COUNT, normalizeListing } from '../utils/symbolCode';
 
 interface NormalizedSymbol {
   market: 'A-Share' | 'HK-Share' | 'US-Share';
@@ -84,20 +85,14 @@ function ema(values: number[], period: number): number[] {
 }
 
 export function normalizeTencentSymbol(input: string): NormalizedSymbol | null {
-  const s = input.trim().toUpperCase().replace(/\s/g, '');
-  if (!s) return null;
-  if (/^\d{6}$/.test(s)) {
-    const prefix = /^(60|68)/.test(s) ? 'sh' : /^(00|30)/.test(s) ? 'sz' : /^(8|4)/.test(s) ? 'bj' : 'sh';
-    return { market: 'A-Share', tencentSymbol: `${prefix}${s}`, code: s, currency: 'CNY' };
-  }
-  if (/^\d{1,5}$/.test(s)) {
-    const code = s.padStart(5, '0');
-    return { market: 'HK-Share', tencentSymbol: `hk${code}`, code, currency: 'HKD' };
-  }
-  if (/^[A-Z][A-Z0-9.]{0,9}$/.test(s)) {
-    return { market: 'US-Share', tencentSymbol: `us${s}`, code: s, currency: 'USD' };
-  }
-  return null;
+  const listing = normalizeListing(input);
+  if (!listing) return null;
+  return {
+    market: listing.market,
+    tencentSymbol: listing.tencentSymbol,
+    code: listing.code,
+    currency: listing.currency,
+  };
 }
 
 export async function fetchTencentKline(
@@ -106,7 +101,7 @@ export async function fetchTencentKline(
 ): Promise<{ bars: TencentBar[]; quote: TencentQuote | null } | null> {
   const url = `https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${tencentSymbol},day,,,${days},qfq`;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 4000);
+  const timer = setTimeout(() => controller.abort(), 8000);
   try {
     const response = await fetch(url, { signal: controller.signal });
     if (!response.ok) return null;
@@ -225,8 +220,8 @@ function mergeQuoteIntoStock(
       : round2(price - (quote?.prevClose || price));
   const peTTM = quote && Number.isFinite(quote.peTTM) && quote.peTTM > 0 ? quote.peTTM : base.peTTM;
 
-  const priceHistory: PricePoint[] = bars.slice(-40).map((b, i) => {
-    const idx = n - Math.min(40, bars.length) + i;
+  const priceHistory: PricePoint[] = bars.map((b, i) => {
+    const idx = i;
     return {
       date: b.date,
       price: b.close,
@@ -302,7 +297,7 @@ export async function getRealtimeStockData(symbol: string): Promise<StockData> {
     return cached.stock;
   }
 
-  const fetched = await fetchTencentKline(normalized.tencentSymbol, 120);
+  const fetched = await fetchTencentKline(normalized.tencentSymbol, BACKTEST_BAR_COUNT);
   if (!fetched) {
     return base;
   }

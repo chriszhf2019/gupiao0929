@@ -144,7 +144,7 @@ export const Step5Technical: React.FC<Step5TechnicalProps> = ({ stock, onOpenDec
           <div>
             <h3 className="text-sm font-serif font-bold text-[#1F3437] dark:text-[#E5EBEA] flex items-center space-x-2">
               <TrendingUp className="w-4 h-4 text-[#3E6F73]" />
-              <span>近 30 个交易日走势与均线（MA5 / MA20 / 支撑阻力带）</span>
+              <span>近 {Math.min(60, stock.priceHistory.length)} 个交易日走势与均线（MA5 / MA20 / 支撑阻力带）</span>
             </h3>
             <p className="text-xs text-[#576F73] dark:text-[#9BB2B4]">
               低饱和度配色护眼，绿色代表收盘价/MA5，青灰色代表MA20
@@ -154,7 +154,7 @@ export const Step5Technical: React.FC<Step5TechnicalProps> = ({ stock, onOpenDec
 
         <div className="h-64 w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={stock.priceHistory} margin={{ top: 10, right: 20, bottom: 0, left: 0 }}>
+            <ComposedChart data={stock.priceHistory.slice(-60)} margin={{ top: 10, right: 20, bottom: 0, left: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#CBD5E1" opacity={0.3} />
               <XAxis dataKey="date" stroke="#7A9194" fontSize={11} tickLine={false} />
               <YAxis

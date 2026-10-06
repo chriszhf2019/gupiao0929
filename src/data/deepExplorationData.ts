@@ -1,4 +1,5 @@
 import { StockData, ScenarioDetail, PeerBenchmarkItem, PorterForces, PreMortemItem } from '../types/stock';
+import { calculateScenarioValuation } from '../utils/institutionalForensics';
 
 export interface StockDeepExplorationData {
   scenarios: {
@@ -9,6 +10,7 @@ export interface StockDeepExplorationData {
   porterForces: PorterForces;
   peers: PeerBenchmarkItem[];
   preMortem: PreMortemItem[];
+  sourceNote?: string;
 }
 
 export const DEEP_EXPLORATION_PRESETS: Record<string, StockDeepExplorationData> = {
@@ -311,46 +313,50 @@ export function getDeepExplorationForStock(stock: StockData): StockDeepExplorati
     return DEEP_EXPLORATION_PRESETS[stock.symbol];
   }
 
-  // Dynamic generative fallback for any other stock symbol
-  const cur = stock.currentPrice;
-  const pe = stock.peTTM || 20;
-
+  const model = calculateScenarioValuation(stock);
+  const unrated = {
+    level: 'medium' as const,
+    score: 0,
+    desc: '未披露，不评分。没有同行对比数据时不推断议价能力。',
+  };
+  const risks = (stock.macro?.keyRisks || []).filter(Boolean);
   return {
+    sourceNote: '没有预置案例。情景价格来自同一套估值引擎；护城河、同业和回撤幅度不填写。',
     scenarios: {
       bull: {
-        probability: 30,
-        cagrGrowth: 22.0,
-        targetPe: Math.round(pe * 1.35),
-        targetPrice: Number((cur * 1.45).toFixed(2)),
-        upsidePercent: 45.0,
-        catalystSummary: `行业景气加速超预期，核心产品市占率与毛利率双升，受益于政策红利催化与估值中枢上移。`,
+        probability: 25,
+        cagrGrowth: model.bull.cagr3Y,
+        targetPe: model.bull.terminalPe,
+        targetPrice: model.bull.fairValue,
+        upsidePercent: model.bull.upsideDownside,
+        catalystSummary: model.assumptionNote || '乐观情景沿用历史营收增速上修后的公允价，不是研究员目标价。',
       },
       base: {
         probability: 50,
-        cagrGrowth: 12.0,
-        targetPe: Math.round(pe * 1.05),
-        targetPrice: Number((cur * 1.15).toFixed(2)),
-        upsidePercent: 15.0,
-        catalystSummary: `业绩符合市场一致预期，现金流充沛，稳健派息为股价提供坚实安全边际。`,
+        cagrGrowth: model.base.cagr3Y,
+        targetPe: model.base.terminalPe,
+        targetPrice: model.base.fairValue,
+        upsidePercent: model.base.upsideDownside,
+        catalystSummary: model.assumptionNote || '基准情景沿用历史营收复合增速和当前市盈率。',
       },
       bear: {
-        probability: 20,
-        cagrGrowth: 2.0,
-        targetPe: Math.round(pe * 0.75),
-        targetPrice: Number((cur * 0.78).toFixed(2)),
-        upsidePercent: -22.0,
-        catalystSummary: `行业竞争加剧或宏观周期下行，营收增速回落，估值回踩历史偏低分位。`,
+        probability: 25,
+        cagrGrowth: model.bear.cagr3Y,
+        targetPe: model.bear.terminalPe,
+        targetPrice: model.bear.fairValue,
+        upsidePercent: model.bear.upsideDownside,
+        catalystSummary: '悲观情景按基准增速的 60% 和市盈率的 75% 计算。净利润不为正时涨跌幅为 0。',
       },
     },
     porterForces: {
-      supplierPower: { level: 'low', score: 80, desc: '上游物料与供应链较为分散，议价能力较强' },
-      buyerPower: { level: 'medium', score: 75, desc: '下游客户黏性尚可，具备一定溢价能力与品牌壁垒' },
-      threatOfNewEntrants: { level: 'low', score: 85, desc: '行业资质、技术壁垒与初始资本开支构筑中高进入门槛' },
-      threatOfSubstitutes: { level: 'low', score: 82, desc: '核心产品成熟，短期内无颠覆性替代方案' },
-      competitiveRivalry: { level: 'medium', score: 72, desc: '存量市场内存在数家同梯队竞品争夺份额' },
-      overallMoatRating: 'Narrow Moat',
+      supplierPower: unrated,
+      buyerPower: unrated,
+      threatOfNewEntrants: unrated,
+      threatOfSubstitutes: unrated,
+      competitiveRivalry: unrated,
+      overallMoatRating: 'Unrated',
       moatTrend: 'Stable',
-      moatSources: ['细分赛道龙头品牌效应', '多年技术沉淀与销售渠道覆盖'],
+      moatSources: ['未评级'],
     },
     peers: [
       {
@@ -366,50 +372,15 @@ export function getDeepExplorationForStock(stock: StockData): StockDeepExplorati
         dividendYield: stock.valuation.dividendYield,
         isCurrentStock: true,
       },
-      {
-        symbol: 'PEER-1',
-        name: `${stock.sector.split('/')[0] || '同业'}参考标的A`,
-        currentPrice: Number((stock.currentPrice * 0.85).toFixed(2)),
-        currency: stock.currency,
-        peTTM: Number((stock.peTTM * 1.1).toFixed(1)),
-        pePercentile: 35.0,
-        grossMargin: Number((stock.fundamentals.grossMarginValue * 0.9).toFixed(1)),
-        roe: Number((stock.fundamentals.roeValue * 0.88).toFixed(1)),
-        revenueGrowth: 8.5,
-        dividendYield: 2.2,
-      },
-      {
-        symbol: 'PEER-2',
-        name: `${stock.sector.split('/')[0] || '同业'}参考标的B`,
-        currentPrice: Number((stock.currentPrice * 1.2).toFixed(2)),
-        currency: stock.currency,
-        peTTM: Number((stock.peTTM * 0.9).toFixed(1)),
-        pePercentile: 25.0,
-        grossMargin: Number((stock.fundamentals.grossMarginValue * 0.95).toFixed(1)),
-        roe: Number((stock.fundamentals.roeValue * 0.92).toFixed(1)),
-        revenueGrowth: 11.2,
-        dividendYield: 2.8,
-      },
     ],
-    preMortem: [
-      {
-        id: 'pm-1',
-        riskScenario: '主营业务行业增速发生断崖式降速',
-        triggerEvent: '下游终端需求饱和或宏观资本开支整体压缩',
-        probability: 'medium',
-        potentialDrawdown: '-25% ~ -35%',
-        earlyWarningSignal: '应收账款与存货周转天数大幅拉长，连续两季毛利滑坡',
-        mitigationPlan: '设定严格防守止损线，若关键支撑位跌破无条件离场减仓',
-      },
-      {
-        id: 'pm-2',
-        riskScenario: '行业价格战加剧导致盈利中枢下移',
-        triggerEvent: '竞争对手大举扩产并以低价抢占市场份额',
-        probability: 'medium',
-        potentialDrawdown: '-20%',
-        earlyWarningSignal: '核心产品平均单价出厂价出现下调信号',
-        mitigationPlan: '重点观察高毛利新业务能否接棒放量，控制单一资产总持仓比例',
-      },
-    ],
+    preMortem: (risks.length ? risks : ['已加载风险列表为空']).slice(0, 3).map((risk, index) => ({
+      id: `pm-${index + 1}`,
+      riskScenario: risk,
+      triggerEvent: '以公司披露和财报模块里的科目变化为准，这里不另编触发事件。',
+      probability: 'low' as const,
+      potentialDrawdown: '未测算',
+      earlyWarningSignal: '看经营现金流、毛利率和负债率是否偏离已加载趋势。',
+      mitigationPlan: '沿用技术模块已计算的止损价，不在这里另给回撤幅度。',
+    })),
   };
 }

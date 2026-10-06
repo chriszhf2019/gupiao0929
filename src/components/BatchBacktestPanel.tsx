@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { runSimpleBacktest, SimpleBacktestResult } from '../utils/simpleBacktest';
+import { BACKTEST_BAR_COUNT } from '../utils/symbolCode';
 import { Activity, Loader2, TrendingUp, AlertTriangle } from 'lucide-react';
 
 interface Candidate {
@@ -38,7 +39,7 @@ export const BatchBacktestPanel: React.FC<BatchBacktestPanelProps> = ({ candidat
       const results = await Promise.all(
         top.map(async (c) => {
           try {
-            const res = await fetch(`/api/kline/${c.code}?days=250`);
+            const res = await fetch(`/api/kline/${c.code}?days=${BACKTEST_BAR_COUNT}`);
             const json: KlineResponse = res.ok ? await res.json() : null;
             const bars = json?.bars || [];
             return { code: c.code, name: c.name, result: runSimpleBacktest(bars) };

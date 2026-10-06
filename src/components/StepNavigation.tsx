@@ -32,7 +32,7 @@ export const StepNavigation: React.FC<StepNavigationProps> = ({
       title: 'Step 1 & 2',
       name: '宏观与行业环境',
       icon: Layers,
-      subtext: `政策热度: ${macroSlider}/10`,
+      subtext: `催化 ${currentStock.macro.policyCatalystScore}/10 · 个人备注 ${macroSlider}/10`,
       score: `${summary.macroPts}/20 分`,
       tier: 'ai' as const,
     },

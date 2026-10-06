@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { StockData } from '../types/stock';
 import { runStrategyBacktest, BacktestStrategyType, BenchmarkBar } from '../utils/backtestEngine';
+import { BACKTEST_BAR_COUNT } from '../utils/symbolCode';
 import {
   Activity,
   TrendingUp,
@@ -40,7 +41,7 @@ export const StrategyBacktestCard: React.FC<StrategyBacktestCardProps> = ({ stoc
 
   useEffect(() => {
     let active = true;
-    fetch(`/api/kline/${BENCHMARK_SYMBOL}?days=120`)
+    fetch(`/api/kline/${BENCHMARK_SYMBOL}?days=${BACKTEST_BAR_COUNT}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((json) => {
         if (active && json?.success && Array.isArray(json.bars)) {

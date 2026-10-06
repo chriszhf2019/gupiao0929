@@ -6,7 +6,7 @@ import { calculateFundamentalScan } from '../utils/stockCalculator';
 import { describeFundamentalRules } from '../utils/fundamentalProfile';
 import { fetchStockHoldings } from '../data/holdingsData';
 import { calculateBeneishAndAltman } from '../utils/institutionalForensics';
-import { calculatePiotroski } from '../utils/piotroski';
+import { PiotroskiCard } from './fundamentals/PiotroskiCard';
 import { request } from '../services/apiClient';
 import {
   ResponsiveContainer,
@@ -71,6 +71,7 @@ export const Step3Fundamentals: React.FC<Step3FundamentalsProps> = ({ stock }) =
         roe: row.roe,
         roeDelta: prev ? `${row.roe - prev.roe >= 0 ? '+' : ''}${(row.roe - prev.roe).toFixed(1)}pct` : '--',
         freeCashFlow: row.freeCashFlow,
+        freeCashFlowToEquity: row.freeCashFlowToEquity,
       };
     }).reverse();
   }, [stock.financialHistory]);
@@ -371,6 +372,7 @@ export const Step3Fundamentals: React.FC<Step3FundamentalsProps> = ({ stock }) =
               {stock.financialSource === 'tushare' || stock.financialSource === 'eastmoney'
                 ? `已接入真实财报数据${stock.financialSource === 'tushare' ? ' (Tushare Pro)' : ' (东方财富)'} · 最近报告期 ${stock.financialHistory[stock.financialHistory.length - 1]?.reportDate || 'N/A'}`
                 : '当前展示内置样例财报口径；联网后将自动切换为东方财富真实财报数据'}
+              。自由现金流 = 经营现金流 − 购建长期资产支付的现金；缺资本开支时显示 --。
             </p>
           </div>
           {stock.financialSource === 'tushare' || stock.financialSource === 'eastmoney' ? (
@@ -398,6 +400,7 @@ export const Step3Fundamentals: React.FC<Step3FundamentalsProps> = ({ stock }) =
                 <th className="pb-2 text-right">ROE</th>
                 <th className="pb-2 text-right">资产负债率</th>
                 <th className="pb-2 text-right">经营现金流</th>
+                <th className="pb-2 text-right">自由现金流</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#E3E7E1]/50 dark:divide-[#2A383A]/50">
@@ -412,6 +415,9 @@ export const Step3Fundamentals: React.FC<Step3FundamentalsProps> = ({ stock }) =
                   <td className="py-2.5 text-right font-mono tabular-nums text-[#576F73] dark:text-[#9BB2B4]">{row.debtToAsset.toFixed(1)}%</td>
                   <td className={`py-2.5 text-right font-mono tabular-nums ${row.freeCashFlow < 0 ? 'text-[#A84A3E] dark:text-[#E2897E]' : 'text-[#4A7C6F] dark:text-[#67A394]'}`}>
                     {row.freeCashFlow.toFixed(1)}
+                  </td>
+                  <td className="py-2.5 text-right font-mono tabular-nums text-[#576F73] dark:text-[#9BB2B4]">
+                    {row.freeCashFlowToEquity == null ? '--' : row.freeCashFlowToEquity.toFixed(1)}
                   </td>
                 </tr>
               ))}
@@ -446,6 +452,7 @@ export const Step3Fundamentals: React.FC<Step3FundamentalsProps> = ({ stock }) =
                 <th className="pb-2 text-right">ROE</th>
                 <th className="pb-2 text-right">ROE 环比</th>
                 <th className="pb-2 text-right">经营现金流</th>
+                <th className="pb-2 text-right">自由现金流</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#E3E7E1]/50 dark:divide-[#2A383A]/50">
@@ -461,6 +468,7 @@ export const Step3Fundamentals: React.FC<Step3FundamentalsProps> = ({ stock }) =
                   <td className="py-2.5 text-right font-mono tabular-nums text-[#576F73] dark:text-[#9BB2B4]">{row.roe.toFixed(1)}%</td>
                   <td className="py-2.5 text-right font-mono tabular-nums text-[#7A9194]">{row.roeDelta}</td>
                   <td className={`py-2.5 text-right font-mono tabular-nums ${row.freeCashFlow < 0 ? 'text-[#A84A3E]' : 'text-[#4A7C6F]'}`}>{row.freeCashFlow.toFixed(1)}</td>
+                  <td className="py-2.5 text-right font-mono tabular-nums text-[#576F73]">{row.freeCashFlowToEquity == null ? '--' : row.freeCashFlowToEquity.toFixed(1)}</td>
                 </tr>
               ))}
             </tbody>
@@ -654,90 +662,6 @@ export const Step3Fundamentals: React.FC<Step3FundamentalsProps> = ({ stock }) =
           </div>
         )}
       </div>
-    </div>
-  );
-};
-
-const PiotroskiCard: React.FC<{ stock: StockData }> = ({ stock }) => {
-  const fscore = calculatePiotroski(stock);
-  const passCount = fscore.items.filter((i) => i.pass).length;
-
-  const scoreColor =
-    fscore.dataQuality !== 'real' ? 'text-[#7A9194]'
-      : fscore.rating === '优质' ? 'text-[#4A7C6F]'
-      : fscore.rating === '良好' ? 'text-[#3E6F73]'
-      : fscore.rating === '中性' ? 'text-[#B0803C]'
-      : 'text-[#A84A3E]';
-
-  return (
-    <div className="mb-8 p-5 rounded-2xl bg-white dark:bg-[#1C2426] border border-[#CBD5E1] dark:border-[#2A383A] shadow-xs space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#E3E7E1] dark:border-[#2A383A] pb-3">
-        <div className="flex items-center space-x-2.5">
-          <div className="p-2 rounded-xl bg-[#4A7C6F]/15 text-[#4A7C6F] dark:text-[#76B4B9]">
-            <ShieldCheck className="w-5 h-5" />
-          </div>
-          <div>
-            <h4 className="text-sm font-serif font-bold text-[#1F3437] dark:text-[#E5EBEA] flex items-center space-x-2">
-              <span>Piotroski F-Score 财务质量评分</span>
-              <span className="text-[10px] px-2 py-0.5 rounded bg-[#4A7C6F]/10 text-[#4A7C6F] font-mono font-bold">
-                皮氏九因子·改善信号
-              </span>
-            </h4>
-            <p className="text-xs text-[#576F73] dark:text-[#9BB2B4]">
-              识别"便宜且基本面正在改善"的标的，与 Beneish 排雷、Altman 破产模型互补
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center space-x-3 shrink-0">
-          <div className="text-right">
-            <div className="text-[11px] text-[#576F73] dark:text-[#9BB2B4]">F-Score</div>
-            <div className={`text-2xl font-black font-mono tabular-nums ${scoreColor}`}>
-              {fscore.dataQuality === 'real' ? `${fscore.score}` : '--'}
-              <span className="text-xs font-normal text-[#7A9194] font-sans">/{fscore.maxScore}</span>
-            </div>
-          </div>
-          <div className="h-8 w-[1px] bg-[#E3E7E1] dark:bg-[#2A383A]" />
-          <div>
-            <div className="text-[11px] text-[#576F73] dark:text-[#9BB2B4]">评级</div>
-            <div className={`text-xs font-bold mt-0.5 ${scoreColor}`}>
-              {fscore.dataQuality === 'real' ? fscore.ratingZh : '数据不足'}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {fscore.dataQuality === 'insufficient' ? (
-        <div className="py-4 text-center text-xs text-[#576F73] dark:text-[#9BB2B4] border border-dashed border-[#E3E7E1] dark:border-[#2A383A] rounded-xl">
-          {fscore.note}
-        </div>
-      ) : (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-          {fscore.items.map((item, idx) => (
-            <div
-              key={idx}
-              className={`flex items-start space-x-2 p-2.5 rounded-lg border text-[11px] leading-snug ${
-                item.pass
-                  ? 'bg-[#4A7C6F]/5 border-[#4A7C6F]/25'
-                  : 'bg-[#F6F7F5] dark:bg-[#141A1B] border-[#E3E7E1] dark:border-[#2A383A] opacity-70'
-              }`}
-            >
-              {item.pass ? (
-                <CheckCircle2 className="w-3.5 h-3.5 text-[#4A7C6F] shrink-0 mt-0.5" />
-              ) : (
-                <AlertCircle className="w-3.5 h-3.5 text-[#A84A3E] shrink-0 mt-0.5" />
-              )}
-              <span className="text-[#1F3437] dark:text-[#E5EBEA]">{item.criterion}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {fscore.dataQuality === 'real' && (
-        <div className="text-[11px] text-[#576F73] dark:text-[#9BB2B4]">
-          通过 {passCount}/{fscore.items.length} 项 · {fscore.note}
-        </div>
-      )}
     </div>
   );
 };

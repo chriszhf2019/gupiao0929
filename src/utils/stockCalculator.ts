@@ -30,12 +30,30 @@ export const VERDICT_THRESHOLDS: { strong: number; accumulate: number; caution: 
   caution: 50, // < 50；介于 50~70 为 hold
 };
 
+const STAGE_MACRO_ADJUST: Record<string, number> = {
+  'High Growth': 2,
+  'Mature Cash Cow': 0,
+  'Cyclical Recovery': -2,
+  Declining: -6,
+};
+
 /**
- * Evaluates the 5-step analysis summary score
+ * 宏观 20 分来自标的上的政策催化分和行业阶段。
+ * 用户滑块只作个人备注，不进入总分。
  */
-export function computeFiveStepSummary(stock: StockData, macroHeatSlider: number) {
-  // Step 1 & 2: Macro (0-20 pts)
-  const macroPts = Math.min(20, Math.round((macroHeatSlider / 10) * 20));
+export function macroPointsFromStock(stock: StockData): number {
+  const raw = Number(stock.macro?.policyCatalystScore);
+  const catalyst = Number.isFinite(raw) ? Math.min(10, Math.max(0, raw)) : 5;
+  const adjust = STAGE_MACRO_ADJUST[stock.macro?.industryStage] ?? 0;
+  return Math.min(20, Math.max(0, Math.round(catalyst * 2) + adjust));
+}
+
+/**
+ * Evaluates the 5-step analysis summary score.
+ * macroHeatSlider 保留给文案，不参与计分。
+ */
+export function computeFiveStepSummary(stock: StockData, _macroHeatSlider?: number) {
+  const macroPts = macroPointsFromStock(stock);
 
   // Step 3: Fundamentals (0-30 pts)
   const fundPts = Math.round((stock.fundamentals.overallScore / 100) * 30);
@@ -112,8 +130,8 @@ export function generateLocalReport(stock: StockData, macroSlider: number): AIAn
   const marginQuality = stock.fundamentals.grossMarginPass ? '毛利率达到当前阈值' : '毛利率未达到当前阈值';
 
   return {
-    summary: `${stock.name} (${stock.symbol}) 五步综合评分为 ${summary.totalScore}/100，结论为「${summary.verdict}」。宏观热度 ${macroSlider}/10。基本面 ${stock.fundamentals.overallScore}/100（${marginQuality}）。估值位于历史 ${percentile}% 分位，${marginPhrase}。`,
-    macroDiagnosis: `宏观热度调至 ${macroSlider}/10，所属行业为【${stock.macro.sectorName}】，${stock.macro.policyTone}`,
+    summary: `${stock.name} (${stock.symbol}) 五步综合评分为 ${summary.totalScore}/100，结论为「${summary.verdict}」。宏观分取政策催化 ${stock.macro.policyCatalystScore}/10（${summary.macroPts}/20），个人热度备注 ${macroSlider}/10 不计入。基本面 ${stock.fundamentals.overallScore}/100（${marginQuality}）。估值位于历史 ${percentile}% 分位，${marginPhrase}。`,
+    macroDiagnosis: `评分使用政策催化分 ${stock.macro.policyCatalystScore}/10 与行业阶段「${stock.macro.industryStageZh}」。个人热度滑块 ${macroSlider}/10 只作备注。所属行业为【${stock.macro.sectorName}】，${stock.macro.policyTone}`,
     fundamentalDiagnosis: `财务评级 ${stock.fundamentals.grade}。毛利率 ${stock.fundamentals.grossMarginValue}%（${stock.fundamentals.grossMarginPass ? '达到当前阈值' : '未达当前阈值'}），净利率 ${stock.fundamentals.netMarginValue}%（${stock.fundamentals.netMarginPass ? '达到当前阈值' : '未达当前阈值'}），资产负债率 ${stock.fundamentals.debtRatioValue}%。`,
     valuationDiagnosis: `当前动态 PE 为 ${stock.valuation.peTTM} 倍，处于 5 年历史 PE 估值的 ${stock.valuation.historicalPePercentile}% 百分位（${stock.valuation.statusZh}），安全边际买入价建议为 ${stock.valuation.marginOfSafetyPrice} ${stock.currency}。`,
     technicalDiagnosis: `技术指标 ${stock.technical.macdSignalZh}，属于 ${stock.technical.trendChannelZh} 形态，关键支撑位 ${stock.technical.supportLevel1} ${stock.currency}，关键压力位 ${stock.technical.resistanceLevel1} ${stock.currency}。`,

@@ -2,6 +2,8 @@ import express from "express";
 import type { StockData } from "../../src/types/stock.js";
 import { PRESET_STOCKS } from "../../src/data/presetStocks.js";
 import { callDeepSeek, parseJsonResponse, loadCanonicalStock, sanitizeAiReport, clampMacroSlider, type DeepSeekMessage } from "../deepseek.js";
+import { buildLocalDeepExploreReport } from "../../src/utils/localDeepExplore.js";
+import { buildUnavailableInvestigativeReport } from "../../src/utils/unavailableInvestigative.js";
 
 export function register(router: express.Router, limits: { aiRateLimit?: express.RequestHandler; deepDiveRateLimit?: express.RequestHandler } = {}) {
   const aiRateLimit = limits.aiRateLimit!;
@@ -204,17 +206,9 @@ export function register(router: express.Router, limits: { aiRateLimit?: express
       const apiKey = process.env.DEEPSEEK_API_KEY;
 
       if (!apiKey) {
-        // High-quality local fallback exploration
         return res.json({
           success: true,
-          report: {
-            topic: targetTopic,
-            executiveInsight: `针对【${stock.name} (${stock.symbol})】关于"${targetTopic}"的深度探索：当前该标的毛利率为 ${stock.fundamentals?.grossMarginValue || 50}%，ROE为 ${stock.fundamentals?.roeValue || 20}%，估值处于历史近5年 ${stock.valuation?.historicalPePercentile || 20}% 分位。在行业${stock.macro?.industryStageZh || '成长期'}背景下，企业具有明显的定价权优势与规模壁垒。`,
-            bullCaseAnalysis: `乐观情景推演（发生概率约 30%）：若核心催化剂（${stock.macro?.keyCatalysts?.join('、') || '行业渗透率提升'}）如期落地，预计未来3年净利润可保持年化 20%~25% 增长，结合估值修复至历史均值 PE ${stock.valuation?.pe5YearAvg || 30} 倍，潜在上涨空间预估可达 +45%~+60%。`,
-            bearCaseAnalysis: `逆向事实验证（发生概率约 20%）：假设遭遇极限压力测试（${stock.macro?.keyRisks?.join('、') || '宏观周期波动与竞争加剧'}），毛利率或被压缩 3~5 个百分点，估值回撤至历史极值支撑位 $${stock.valuation?.pe5YearMin || stock.technical?.supportLevel1}，最大下行保护需依赖高股息与充沛经营性现金流。`,
-            moatDurability: `护城河演变研判：公司在业内具有强大的品牌溢价及转换成本，短期内上游供应与下游议价均处于主导地位，波特五力结构显示整体壁垒稳固，护城河评级为【宽护城河 (Wide Moat)】且趋势稳定。`,
-            actionableFramework: `机构执行策略：采用非对称胜率策略，以 $${stock.technical?.positionStrategy?.firstBatch?.targetPrice || stock.technical?.supportLevel1} 为第一买点左侧分批布局，若触及严格止损线 $${stock.technical?.positionStrategy?.stopLossPrice || stock.technical?.supportLevel2} 坚决控仓，总体风险收益比评估为 2.8 : 1，适合中长期价值投资者。`,
-          },
+          report: buildLocalDeepExploreReport(stock, targetTopic),
         });
       }
 
@@ -274,171 +268,9 @@ export function register(router: express.Router, limits: { aiRateLimit?: express
       const apiKey = process.env.DEEPSEEK_API_KEY;
 
       if (!apiKey) {
-        // Return high-quality structured default
         return res.json({
           success: true,
-          report: {
-            targetName: effectiveTarget,
-            targetSymbol: symbol || namedStock?.symbol,
-            industry: effectiveIndustry,
-            topicTitle: `穿透【${effectiveTarget}】：繁荣故事背后的真实变现率与估值反差`,
-            anomalousContrast: {
-              expected: `大众与资本市场普遍预期【${effectiveTarget}】将快速实现全行业替代与万亿级商业化变现。`,
-              reality: `翻开审计底稿与真实销售台账，真实商业化/产线落地收入占比仅为个位数，95%以上均属于样机或公关巡游。`,
-              coreDilemmaQuestion: `发布会天天高呼量产爆发，但翻遍财报底稿，真正为终端客户创造经济效益的收入去哪了？`,
-            },
-            closedLoopMechanics: {
-              moneyOrigin: "地方政府招商引导补贴、课题科研经费与一级市场高估值融资",
-              moneyDestination: "本体厂商样机出货做流水、数据中介赚取标定费用、二级市场借概念拉抬股价",
-              intermediaryBeneficiaries: "地方政府拿政绩 → 公司做大营收冲刺估值 → 合作方分润流水 → 资本方高位套现",
-              costBearer: "盲目跟风追高的二级市场散户投资者、垫资过度的供应链供应商",
-              coreMissingDemand: "终端客户缺乏真实自发买单意愿，ROI投资回报率无法算平，缺乏真实工业级复购。",
-              chainSummary: "体外设立数采基地拿补贴 → 定向采购样机制造放量通稿 → 包装数据资产冲高估值 → 二级市场炒作套现。",
-            },
-            extremeContrastData: {
-              metricA: { label: "板块概念总市值与估值", value: "超 2,000 亿元", context: "资本市场已提前透支未来十年最乐观的成长天花板" },
-              metricB: { label: "真实终端商业化落地收入占比", value: "仅 3.5%", context: "绝大部分收入来自于一次性课题采购与演示展厅" },
-              contrastImpact: "3.5%的真实微薄造血撑起了数千亿市值神话，概念预期与现实严重脱节！",
-              verifiableSource: "上市公司分部财务附注、行业招投标公开中标数据库、权威行业协会供应链抽检",
-            },
-            emotionalExplosion: {
-              publicAngerTrigger: "普通散户被科技杂技宣传片忽悠追高接盘，最终被深套在历史最高点",
-              colloquialPunchline: "资本市场把实验室玩具当成工业救星炒上了天，这是在公然侮辱投资者的智商！",
-              soulInterrogation: "等发布会跳舞的音乐停下，资本市场终究要回答：你的产品，今天到底给客户造出了几个合格的零件？",
-            },
-            hookQuestion: `为什么发布会天天高呼划时代突破，翻开财报底稿真实工业/商业落地收入却连5%都不到？`,
-            contrastStatement: `数千亿概念市值与仅占个位数的真实产线收入形成强烈反差，大量订单滞留在高校样机与展厅巡游！`,
-            revenueStructure: [
-              {
-                segment: "科研教育与政府示范项目采购",
-                percentage: 65.0,
-                amount: "主要收入来源",
-                isRealCommercial: false,
-                note: "单次采购为主，缺乏连续复购与产业造血",
-              },
-              {
-                segment: "品牌展会巡游与营销活动租赁",
-                percentage: 22.0,
-                amount: "公关宣传性质",
-                isRealCommercial: false,
-                note: "配合发布会造势，非刚性生产力需求",
-              },
-              {
-                segment: "真实生产线/终端商业规模化落地",
-                percentage: 3.5,
-                amount: "真实工业产线回款",
-                isRealCommercial: true,
-                note: "苛刻节拍与稳定性考核下，渗透率极低",
-              },
-              {
-                segment: "相关软件开发服务与数据包打包销售",
-                percentage: 9.5,
-                amount: "概念包装",
-                isRealCommercial: false,
-                note: "多与样机捆绑做高账面毛利",
-              },
-            ],
-            valuationContrast: {
-              marketCap: "行业概念整体估值超千亿",
-              realCommercialRevenue: "真实规模化量产贡献极低",
-              realSharePercent: 3.5,
-              bubbleMultiple: "极高概念溢价倍数",
-              conclusion: "资本过度提前透支了5-10年的技术商业化普及周期，短期需警惕戴维斯双杀。",
-            },
-            coldHardDataSummary: "供应链实地摸底显示：设备在真实产线的故障间隔时间（MTBF）仍未达到量产及格线，投资回收期远超工厂预期。应收账款周转天数拉长，前五大客户高度集中于关联孵化机构。",
-            auditRedFlags: [
-              "客户集中度异常高，存在关联方数采中心循环采购",
-              "存货周转天数大幅上升，早期试制机型存在未充分计提跌价风险",
-              "研发资本化比例偏高，将大量试错成本转化为账面资产",
-            ],
-            hiddenClosedLoop: [
-              {
-                step: 1,
-                title: "设立关联孵化示范中心",
-                desc: "以地方产业基金扶持为名义，成立外部采购载体获取政策补贴。",
-              },
-              {
-                step: 2,
-                title: "制造批量样机采购热潮",
-                desc: "向本体厂商采购大批演示样机，对外发布批量量产签约新闻公报。",
-              },
-              {
-                step: 3,
-                title: "做大衍生数据/技术资产",
-                desc: "将日常巡游采集的数据包装为专有模型资产，高溢价回购或计入投资。",
-              },
-              {
-                step: 4,
-                title: "二级市场炒作并高位套现",
-                desc: "借赛道爆发热度拉升估值，投资机构或大股东趁高估值完成再融资或减持。",
-              },
-            ],
-            logicChainAnalysis: "工业制造的本质是算投资回报率（ROI）。当资本用‘能跑能跳’的实验室产品偷换‘工业级稳定高节拍’的量产概念时，所谓的订单爆发不过是特定资金在封闭圈子里的自娱自乐。物理规律不会向PPT屈服。",
-            emotionalResonance: "二级市场的股民在发布会前彻夜难眠、期待见证历史；车间里的工程师却在为屡屡死机的主控板发愁。我们尊重真正的硬科技攻坚，但痛恨那些把未成型概念当成镰刀的资本魔术。",
-            viralTitles: [
-              {
-                type: "疑问反差",
-                title: `都在台上跳舞巡游，为什么进不去车间？千亿市值背后的惊人真相`,
-                hookStyle: "直击视觉反差与悬念",
-              },
-              {
-                type: "数据实锤",
-                title: `真实落地收入仅占3.5%！拆解【${effectiveTarget}】产业链财报的暗流`,
-                hookStyle: "硬核数据暴击",
-              },
-              {
-                type: "情绪痛点",
-                title: `别再被科技杂技忽悠了！资本把科研玩具包装成万亿赛道割了谁？`,
-                hookStyle: "引发股民深度共鸣",
-              },
-              {
-                type: "内幕拷问",
-                title: `买设备、卖数据、再上市：揭秘所谓量产闭环的隐秘利益链`,
-                hookStyle: "利益链条深度拷问",
-              },
-            ],
-            wechatArticle: `## 引言：当神话撞上冰冷的流水线\n\n资本市场最擅长讲万亿星辰大海的故事，但流水线上的账本从来不认狂欢。\n\n深入财报底层我们发现，概念热炒下的真实落地收入甚至不足 4%。繁荣的表象之下，是大量教具采购与展会租赁在维持热度。投资需要回归常识，穿透一切浮躁泡沫。`,
-            shortVideoScript: {
-              hook3s: "（画面：华丽的发布会展厅切换到空旷冷清的车间）“你以为它在拯救制造业，其实它连工厂大门都还没真正迈进去！”",
-              scenes: [
-                {
-                  sceneNumber: 1,
-                  duration: "0-5s",
-                  visual: "炫酷发布会集锦与大字标语",
-                  audio: "“天天看新闻吹得神乎其神，你以为马上要颠覆流水线了？”",
-                  emotionTag: "悬念抓人",
-                },
-                {
-                  sceneNumber: 2,
-                  duration: "6-18s",
-                  visual: "营收结构饼图穿透拆解",
-                  audio: "“翻看审计底稿，真实工业产线占比仅有可怜的3.5%！全靠高校和展会买单！”",
-                  emotionTag: "事实反差",
-                },
-                {
-                  sceneNumber: 3,
-                  duration: "19-30s",
-                  visual: "利益闭环图解与防守点位提示",
-                  audio: "“认清真相，守住钱袋子，别给概念狂欢买单！”",
-                  emotionTag: "清醒警示",
-                },
-              ],
-              callToAction: "点赞关注，带你看懂每一张财报背后的真相！",
-            },
-            socialPost: `【#真实落地收入仅3.5%？拆解繁荣背后的资本闭环#】\n别被发布会上的科技杂技蒙蔽了双眼！\n财报穿透显示：真实工业产线落地收入不足4%，96%以上来自高校样机和展会巡游。\n用数据说话，尊重硬科技规律，拒绝为故事接盘！`,
-            signals: [
-              {
-                id: "sig-server-1",
-                source: "供应链一线工程师访谈实录",
-                category: "whistleblower",
-                content: "设备平均无故障时间仍无法胜任三班倒连续作业，所谓产线部署多停留在试点打样阶段。",
-                credibilityScore: 91,
-                status: "verified",
-                evidenceSnippet: "现场调试工单与日志记录",
-              },
-            ],
-            complianceDisclaimer: "【编辑案例】未配置模型时返回的数字（如 3.5%、数千亿）是叙事模板，不是该公司披露。请勿与财报模块的真实科目对照成事实。不构成投资建议。",
-          },
+          report: buildUnavailableInvestigativeReport(effectiveTarget, symbol || namedStock?.symbol, effectiveIndustry, namedStock),
         });
       }
 
@@ -449,9 +281,13 @@ export function register(router: express.Router, limits: { aiRateLimit?: express
   - 目标公司/赛道: ${effectiveTarget}
   - 目标代码: ${targetSymbol || "N/A"}
   - 所属行业: ${effectiveIndustry}
+  - 已加载科目: 市盈率 ${namedStock?.peTTM ?? "未加载"}，历史分位 ${namedStock?.valuation?.historicalPePercentile ?? "未加载"}%，毛利率 ${namedStock?.fundamentals?.grossMarginValue ?? "未加载"}%，ROE ${namedStock?.fundamentals?.roeValue ?? "未加载"}%，最近一期经营现金流 ${namedStock?.financialHistory?.at(-1)?.freeCashFlow ?? "未加载"} 亿元
   - 补充背景/聚焦要点: ${customPrompt || "深挖预期与现实的强烈反差、多方共赢但无真实需求的利益闭环、极端实锤数据对撞与大众情绪痛点"}
 
-  【核心方法论与执行步骤】:
+  【数字纪律】
+只允许使用下方已加载科目里出现的数字。分部收入占比、产线落地率、市值、门店数量、回扣金额如果没有出现在已加载科目中，必须写成「未披露」，禁止编造 3.5%、数千亿或其他模板数字。
+
+【核心方法论与执行步骤】:
   一、第一步：从“反常现象”抓核心矛盾
   - 找到“预期与现实的强烈反差”：找“所有人都觉得应该发生，但实际没发生”的现象（如：机器人预期替代工人 vs 都在跳舞；新能源预期暴涨 vs 4S店退网倒闭超4000家；医药预期降价 vs 11年收回扣1.84亿；开票经济预期合规 vs 虚开3亿赚1300万仅罚50万）。
   - 转化成直击痛点的问题（hookQuestion & anomalousContrast）。
