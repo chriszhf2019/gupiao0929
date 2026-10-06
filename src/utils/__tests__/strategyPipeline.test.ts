@@ -22,6 +22,7 @@ describe('选股策略、情景价与跟踪', () => {
   it('硬条件筛掉不合格的核心池标的，并带上情景价', () => {
     const dividend = rankPresetCandidates(Object.values(PRESET_STOCKS), '高股息红利').map((item) => item.symbol);
     expect(dividend).toContain('000001');
+    expect(rankPresetCandidates(Object.values(PRESET_STOCKS), '高股息红利').find((item) => item.symbol === '000001')?.outlook.basis).toBe('unavailable');
     expect(dividend).toContain('600519');
     expect(dividend).not.toContain('NVDA');
 

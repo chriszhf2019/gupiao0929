@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessMarketRegime, RegimeBar } from '../marketRegime';
+import { assessMarketRegime, RegimeBar, splitTrackedByRegime } from '../marketRegime';
 
 function bars(start: number, end: number, count = 80): RegimeBar[] {
   return Array.from({ length: count }, (_, index) => ({
@@ -48,6 +48,12 @@ describe('市场状态、趋势与策略选择', () => {
     expect(regime.tone).toBe('divergence');
     expect(regime.preferredStyles).toEqual(['价值白马', '高股息红利']);
     expect(regime.deferredStyles).toContain('高景气成长');
+  });
+
+  it('跟踪名单按当前主策略分成仍匹配和已退出', () => {
+    const split = splitTrackedByRegime(['高股息红利', '高景气成长', '自定策略'], ['高股息红利', '价值白马']);
+    expect(split.still).toEqual(['高股息红利']);
+    expect(split.dropped).toEqual(['高景气成长']);
   });
 
   it('日 K 不足时不编造趋势', () => {

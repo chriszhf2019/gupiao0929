@@ -9,11 +9,11 @@ interface InvestigativeHeaderBarProps {
 }
 
 const PRESET_CASE_BUTTONS = [
-  { key: '300124', label: '实战1: 人形机器人' },
-  { key: '601127', label: '实战2: 新能源4S退网' },
-  { key: '600276', label: '实战3: 医药回扣反腐' },
-  { key: 'invoice', label: '实战4: 税收洼地虚开' },
-  { key: '600519', label: '白酒金融蓄水池' },
+  { key: '300124', label: '编辑案例1: 人形机器人' },
+  { key: '601127', label: '编辑案例2: 新能源4S退网' },
+  { key: '600276', label: '编辑案例3: 医药回扣反腐' },
+  { key: 'invoice', label: '编辑案例4: 税收洼地虚开' },
+  { key: '600519', label: '编辑案例: 白酒金融蓄水池' },
 ];
 
 export const InvestigativeHeaderBar: React.FC<InvestigativeHeaderBarProps> = ({
@@ -55,7 +55,7 @@ export const InvestigativeHeaderBar: React.FC<InvestigativeHeaderBarProps> = ({
         <div className="flex items-center flex-wrap gap-2">
           <span className="text-[11px] font-semibold text-slate-400 flex items-center gap-1">
             <Cpu className="w-3.5 h-3.5 text-indigo-400" />
-            标杆案例：
+            编辑案例：
           </span>
           {PRESET_CASE_BUTTONS.map((item) => (
             <button

@@ -46,6 +46,13 @@ describe('calculateScenarioValuation 三情景', () => {
     expect(model.assumptionNote).toContain('营收复合增速');
   });
 
+  it('银行、保险、证券不外推三年目标价', () => {
+    const stock = makeStock({ sector: '商业银行 / 金融板块', macro: { ...makeStock().macro, sectorName: '银行' } });
+    const model = calculateScenarioValuation(stock);
+    expect(model.base.terminalPe).toBe(0);
+    expect(model.assumptionNote).toContain('不给三年目标价');
+  });
+
   it('最近一期净利润不为正时不外推', () => {
     const stock = makeStock();
     stock.financialHistory[stock.financialHistory.length - 1].netProfit = -1;

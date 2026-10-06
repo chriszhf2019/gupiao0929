@@ -8,6 +8,8 @@ import { TrackingTargetCard } from './tracking/TrackingTargetCard';
 import { TrackingEventsCard } from './tracking/TrackingEventsCard';
 import { TrackingNotesCard } from './tracking/TrackingNotesCard';
 import { AddTrackedStockModal } from './tracking/AddTrackedStockModal';
+import { TrackingRegimeStatus } from './tracking/TrackingRegimeStatus';
+import { applyStrategyToTracked, outlookFromStock } from '../utils/strategyPipeline';
 import { PRESET_STOCKS } from '../data/presetStocks';
 import { stockService } from '../services/stockService';
 import {
@@ -61,6 +63,7 @@ export const StockTrackingHub: React.FC<StockTrackingHubProps> = ({
   const [addCustomCode, setAddCustomCode] = useState('');
   const [addCustomLoading, setAddCustomLoading] = useState(false);
   const [addCustomError, setAddCustomError] = useState<string | null>(null);
+  const [refreshingOutlook, setRefreshingOutlook] = useState(false);
   const [isEditingTargets, setIsEditingTargets] = useState(false);
 
   // New Note inputs
@@ -206,6 +209,33 @@ export const StockTrackingHub: React.FC<StockTrackingHubProps> = ({
     setNewEventNote('');
   };
 
+  const handleRefreshOutlooks = async (symbols: string[]) => {
+    if (refreshingOutlook || symbols.length === 0) return;
+    setRefreshingOutlook(true);
+    try {
+      const updates = new Map<string, TrackedStockItem>();
+      for (const symbol of symbols) {
+        const existing = trackedList.find((item) => item.symbol === symbol);
+        const strategyName = existing?.strategyOutlook?.strategyName;
+        if (!existing || !strategyName) continue;
+        const stock = await stockService.getStockBySymbol(symbol);
+        const drafted = createTrackedStockFromStockData(stock, existing.trackStatus);
+        const next = applyStrategyToTracked(drafted, outlookFromStock(stock), strategyName);
+        next.upcomingEvents = existing.upcomingEvents;
+        next.notes = [...next.notes, ...existing.notes.filter((note) => note.stage !== '策略预测')];
+        next.priority = existing.priority;
+        next.alertsEnabled = existing.alertsEnabled;
+        next.addedDate = existing.addedDate;
+        updates.set(symbol, next);
+      }
+      if (updates.size > 0) {
+        setTrackedStocks((prev) => prev.map((item) => updates.get(item.symbol) || item));
+      }
+    } finally {
+      setRefreshingOutlook(false);
+    }
+  };
+
   const handleAddStock = (stock: StockData) => {
     const existing = trackedList.find((i) => i.symbol === stock.symbol);
     if (existing) {
@@ -302,6 +332,8 @@ export const StockTrackingHub: React.FC<StockTrackingHubProps> = ({
           </button>
         </div>
       </div>
+
+      <TrackingRegimeStatus tracked={trackedList} busy={refreshingOutlook} onRefresh={(symbols) => { void handleRefreshOutlooks(symbols); }} />
 
       {/* Filter Tabs */}
       <div className="flex items-center space-x-2 overflow-x-auto pb-1 text-xs">

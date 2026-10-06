@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { PRESET_STOCKS } from '../../data/presetStocks';
 import { useStrategyTracking } from '../../hooks/useStrategyTracking';
 import { assessMarketRegime, RegimeBar, RegimeBreadth, RegimeIndex, STRATEGY_PLAYBOOK } from '../../utils/marketRegime';
-import { rankPresetCandidates } from '../../utils/strategyPipeline';
+import { rankPresetCandidates, rankSnapshotCandidates, ScreenSnapshot } from '../../utils/strategyPipeline';
 import { VaultPasswordGate } from '../portfolio/VaultPasswordGate';
 
 export function MarketRegimePanel({
@@ -10,6 +10,7 @@ export function MarketRegimePanel({
   breadth,
   bars,
   leaders,
+  screenItems = [],
   onOpenStrategy,
   onOpenTracking,
   onSelectStock,
@@ -18,6 +19,7 @@ export function MarketRegimePanel({
   breadth: RegimeBreadth | null;
   bars: RegimeBar[];
   leaders: { name: string }[];
+  screenItems?: ScreenSnapshot[];
   onOpenStrategy?: (prompt: string) => void;
   onOpenTracking?: (symbol: string) => void;
   onSelectStock?: (symbol: string) => void;
@@ -64,6 +66,9 @@ export function MarketRegimePanel({
             {regime.preferredStyles.map((style) => {
               const play = STRATEGY_PLAYBOOK.find((item) => item.style === style);
               const matches = rankPresetCandidates(Object.values(PRESET_STOCKS), style, 3);
+              const marketMatches = rankSnapshotCandidates(screenItems, style, 8)
+                .filter((item) => !matches.some((preset) => preset.symbol === item.symbol))
+                .slice(0, 4);
               return (
                 <div key={style} className="rounded-xl border border-[#E3E7E1] dark:border-[#2A383A] p-3">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -105,6 +110,28 @@ export function MarketRegimePanel({
                           </button>
                         </div>
                       ))}
+                    </div>
+                  )}
+                  {marketMatches.length > 0 && (
+                    <div className="mt-3">
+                      <p className="text-[11px] text-[#7A9194] mb-2">全市场快照里符合规则的标的。跟进时再拉财报；银行、保险、证券不外推三年目标价。</p>
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                        {marketMatches.map((item) => (
+                          <div key={item.symbol} className="rounded-lg border border-[#E3E7E1] dark:border-[#2A383A] p-2 text-xs">
+                            <button type="button" onClick={() => onSelectStock?.(item.symbol)} className="font-bold text-[#1F3437] dark:text-[#E5EBEA] cursor-pointer">
+                              {item.name} <span className="font-mono text-[#7A9194]">{item.symbol}</span>
+                            </button>
+                            <p className="text-[11px] text-[#576F73] dark:text-[#9BB2B4] mt-1">{item.reasons.join(' · ')}</p>
+                            <button
+                              type="button"
+                              onClick={() => tracking.track(item.symbol, style)}
+                              className="mt-2 px-2 py-1 rounded-lg bg-[#1F3437] text-white text-[11px] cursor-pointer"
+                            >
+                              {tracking.busySymbol === item.symbol ? '写入中...' : '跟进'}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>

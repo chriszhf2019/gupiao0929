@@ -170,6 +170,7 @@ export const Step4Valuation: React.FC<Step4ValuationProps> = ({ stock }) => {
             </div>
           </div>
 
+          {scenarioModel.base.terminalPe > 0 && (
           <div className="flex items-center space-x-2 bg-white dark:bg-[#1C2426] px-3 py-1 rounded-lg border border-[#E3E7E1] dark:border-[#2A383A] text-xs">
             <Scale className="w-3.5 h-3.5 text-[#3E6F73] dark:text-[#76B4B9]" />
             <span className="text-[#576F73] dark:text-[#9BB2B4]">当前盈亏比 (赔率):</span>
@@ -177,8 +178,13 @@ export const Step4Valuation: React.FC<Step4ValuationProps> = ({ stock }) => {
               {scenarioModel.riskRewardRatio}:1
             </span>
           </div>
+          )}
         </div>
 
+        {scenarioModel.base.terminalPe === 0 ? (
+          <p className="text-xs text-[#576F73] dark:text-[#9BB2B4] leading-relaxed">{scenarioModel.assumptionNote}</p>
+        ) : (
+        <>
         {/* 交互滑块控制区 */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 rounded-xl bg-white dark:bg-[#1C2426] border border-[#E3E7E1] dark:border-[#2A383A]">
           <div>
@@ -299,6 +305,8 @@ export const Step4Valuation: React.FC<Step4ValuationProps> = ({ stock }) => {
             </span>
           </div>
         </div>
+        </>
+        )}
       </div>
     </div>
   );

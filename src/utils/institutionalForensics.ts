@@ -1,4 +1,5 @@
 import { StockData, ForensicForensicsResult, ScenarioValuationModel, PositionSizingResult } from '../types/stock';
+import { isFinancialSector } from './fundamentalProfile';
 
 function buildInsufficientResult(stock: StockData): ForensicForensicsResult {
   return {
@@ -189,6 +190,10 @@ export function calculateScenarioValuation(
   baseCagr?: number,
   basePe?: number
 ): ScenarioValuationModel {
+  if (isFinancialSector(stock)) {
+    return flatScenario(stock, '银行、保险、证券不用工业企业的盈利增速外推，这里不给三年目标价。');
+  }
+
   const inferred = inferScenarioAssumptions(stock);
   const cagr = baseCagr ?? inferred.cagr;
   const exitPe = basePe ?? inferred.exitPe;

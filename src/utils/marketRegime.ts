@@ -1,4 +1,4 @@
-import { StrategyStyle } from './strategyPipeline';
+import { isStrategyStyle, StrategyStyle } from './strategyPipeline';
 
 export interface RegimeIndex {
   code: string;
@@ -125,6 +125,14 @@ const TREND_ZH: Record<MarketTrend, string> = {
   sideways: '震荡',
   unknown: '暂无法判断',
 };
+
+export function splitTrackedByRegime(strategyNames: string[], preferred: StrategyStyle[]) {
+  const known = strategyNames.filter(isStrategyStyle);
+  return {
+    still: known.filter((name) => preferred.includes(name)),
+    dropped: known.filter((name) => !preferred.includes(name)),
+  };
+}
 
 export function assessMarketRegime(input: {
   indices: RegimeIndex[];

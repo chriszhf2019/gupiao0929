@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { request } from '../services/apiClient';
 import { MarketRegimePanel } from './market/MarketRegimePanel';
+import { ScreenSnapshot } from '../utils/strategyPipeline';
 import { LayoutDashboard, RefreshCw, Sparkles, ArrowUpRight, ArrowDownRight, Activity } from 'lucide-react';
 
 interface MarketIndex {
@@ -75,6 +76,7 @@ export const MarketDashboardView: React.FC<{
   const [fundFlow, setFundFlow] = useState<BoardQuote[]>([]);
   const [loading, setLoading] = useState(false);
   const [shanghaiBars, setShanghaiBars] = useState<{ date: string; price: number }[]>([]);
+  const [screenItems, setScreenItems] = useState<ScreenSnapshot[]>([]);
   const [review, setReview] = useState<string>();
   const [reviewLoading, setReviewLoading] = useState(false);
   const [reviewError, setReviewError] = useState<string>();
@@ -82,11 +84,12 @@ export const MarketDashboardView: React.FC<{
   const loadMarket = async () => {
     setLoading(true);
     try {
-      const [overview, quick, breadthRes, kline] = await Promise.all([
+      const [overview, quick, breadthRes, kline, screen] = await Promise.all([
         request<MarketOverviewResponse>('/api/market-overview'),
         request<{ success: boolean; quotes?: QuickQuote[] }>('/api/quick-quotes'),
         request<MarketBreadthResponse>('/api/market-breadth'),
         request<{ success?: boolean; bars?: { date: string; price: number }[] }>('/api/kline/sh000001?days=120'),
+        request<{ items?: ScreenSnapshot[] }>('/api/screener', { timeoutMs: 15000 }).catch(() => ({ items: [] })),
       ]);
       if (overview?.indices) {
         setIndices(overview.indices);
@@ -97,6 +100,7 @@ export const MarketDashboardView: React.FC<{
       if (breadthRes?.leaders) setLeaders(breadthRes.leaders);
       if (breadthRes?.fundFlow) setFundFlow(breadthRes.fundFlow);
       if (kline?.bars) setShanghaiBars(kline.bars);
+      if (screen?.items) setScreenItems(screen.items);
     } catch (error) {
       console.warn('加载市场数据失败:', error);
     } finally {
@@ -162,6 +166,7 @@ export const MarketDashboardView: React.FC<{
         breadth={breadth}
         bars={shanghaiBars}
         leaders={leaders}
+        screenItems={screenItems}
         onOpenStrategy={onOpenStrategy}
         onOpenTracking={onOpenTracking}
         onSelectStock={onSelectStock}
