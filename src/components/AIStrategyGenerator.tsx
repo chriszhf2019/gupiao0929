@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AIStockStrategy, SnapshotCandidate } from '../types/stock';
 import { aiService } from '../services/aiService';
 import { request } from '../services/apiClient';
@@ -27,6 +27,7 @@ interface AIStrategyGeneratorProps {
   onSelectStock: (symbol: string) => void;
   onApplyStrategyFilter?: (strategy: AIStockStrategy) => void;
   onOpenTracking?: (symbol: string) => void;
+  initialPrompt?: string | null;
 }
 
 const INSPIRATION_IDEAS = [
@@ -52,6 +53,7 @@ export const AIStrategyGenerator: React.FC<AIStrategyGeneratorProps> = ({
   onSelectStock,
   onApplyStrategyFilter,
   onOpenTracking,
+  initialPrompt,
 }) => {
   const [ideaInput, setIdeaInput] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -61,8 +63,9 @@ export const AIStrategyGenerator: React.FC<AIStrategyGeneratorProps> = ({
   const [snapshots, setSnapshots] = useState<SnapshotCandidate[]>([]);
   const [isSaved, setIsSaved] = useState(false);
   const tracking = useStrategyTracking(onOpenTracking);
+  const seededPrompt = useRef<string | null>(null);
 
-  const handleGenerate = async (promptToUse?: string) => {
+  const handleGenerate = useCallback(async (promptToUse?: string) => {
     const text = (promptToUse || ideaInput).trim();
     if (!text) return;
 
@@ -84,7 +87,14 @@ export const AIStrategyGenerator: React.FC<AIStrategyGeneratorProps> = ({
     } finally {
       setIsGenerating(false);
     }
-  };
+  }, [ideaInput]);
+
+  useEffect(() => {
+    if (!initialPrompt || seededPrompt.current === initialPrompt) return;
+    seededPrompt.current = initialPrompt;
+    setIdeaInput(initialPrompt);
+    void handleGenerate(initialPrompt);
+  }, [initialPrompt, handleGenerate]);
 
   useEffect(() => {
     if (!currentStrategy) return;

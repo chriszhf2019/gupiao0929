@@ -125,6 +125,7 @@ export default function App() {
   const [isDecisionLedgerOpen, setIsDecisionLedgerOpen] = useState<boolean>(false);
   const [isDecisionLedgerNewTrigger, setIsDecisionLedgerNewTrigger] = useState<boolean>(false);
   const [screenerSymbols, setScreenerSymbols] = useState<string[] | null>(null);
+  const [strategySeed, setStrategySeed] = useState<string | null>(null);
 
   const handleSearchSymbol = (sym: string) => {
     const upper = sym.trim().toUpperCase();
@@ -180,7 +181,14 @@ export default function App() {
         <Suspense fallback={<ViewLoadingFallback />}>
         {/* View 1: Five-Step Deep Dive */}
         {currentView === 'market' && (
-          <MarketDashboardView />
+          <MarketDashboardView
+            onSelectStock={(sym) => navigate('five-step', sym)}
+            onOpenTracking={(sym) => navigate('tracking', sym)}
+            onOpenStrategy={(prompt) => {
+              setStrategySeed(prompt);
+              navigate('strategy');
+            }}
+          />
         )}
 
         {/* View 1: Five-Step Deep Dive */}
@@ -356,6 +364,7 @@ export default function App() {
         {/* View: AI 自然语言策略生成器 */}
         {currentView === 'strategy' && (
           <AIStrategyGenerator
+            initialPrompt={strategySeed}
             onSelectStock={(sym) => navigate('five-step', sym)}
             onOpenTracking={(sym) => navigate('tracking', sym)}
             onApplyStrategyFilter={(strategy) => {
