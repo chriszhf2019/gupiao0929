@@ -2,7 +2,7 @@ import "dotenv/config";
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { rateLimit, requireApiAccess } from "./server/security.js";
+import { productionAccessProblem, rateLimit, requireApiAccess } from "./server/security.js";
 import { register as registerStockRoutes } from "./server/routes/stock.js";
 import { register as registerInstitutionalRoutes } from "./server/routes/institutional.js";
 import { register as registerMarketRoutes } from "./server/routes/market.js";
@@ -26,10 +26,10 @@ app.use((_req, res, next) => {
 
 app.use(express.json({ limit: "1mb" }));
 
-if (process.env.NODE_ENV === "production" && !process.env.ACCESS_TOKEN) {
-  console.warn(
-    "[安全] 生产模式下未配置 ACCESS_TOKEN，/api 接口对外完全开放。建议在 .env 中设置 ACCESS_TOKEN 并设置 VITE_ACCESS_TOKEN。"
-  );
+const accessProblem = productionAccessProblem();
+if (accessProblem) {
+  console.error(`[安全] ${accessProblem}`);
+  process.exit(1);
 }
 
 const api = express.Router();

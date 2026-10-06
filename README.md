@@ -54,12 +54,19 @@ npm run dev                # 默认 http://localhost:3000
 
 ### 4. 生产部署
 ```bash
+# 服务器环境变量。ACCESS_TOKEN 至少 8 位；未设置时生产进程会直接退出。
+export ACCESS_TOKEN='请换成一串足够长的随机令牌'
+export NODE_ENV=production
+export PORT=3000
+
 npm run build              # 产出 dist/（前端静态 + server.cjs）
-NODE_ENV=production PORT=3000 npm start
+npm start
 ```
-公网部署**务必**：
-- 设置 `ACCESS_TOKEN` + `VITE_ACCESS_TOKEN`（所有 /api 需 Bearer 令牌）
-- 用 Nginx/HTTPS 反向代理，或至少置于内网
+第一次打开页面时输入同一个令牌，它只存在这台浏览器的 localStorage。不要把令牌写进 `VITE_ACCESS_TOKEN` 再构建，否则会进前端包。
+
+公网部署再加两件事：
+- 用 Nginx/HTTPS 反向代理，或只放在内网
+- `ACCESS_TOKEN` 和 DeepSeek 密钥只放在服务器环境变量里，不要提交到仓库
 
 ---
 

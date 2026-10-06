@@ -1,7 +1,19 @@
 import express from "express";
 
+export function productionAccessProblem(): string | null {
+  if (process.env.NODE_ENV !== "production") return null;
+  const token = process.env.ACCESS_TOKEN?.trim() ?? "";
+  if (!token) return "生产模式未设置 ACCESS_TOKEN，服务拒绝启动，避免接口对外敞开。";
+  if (token.length < 8) return "ACCESS_TOKEN 至少 8 位。";
+  return null;
+}
+
 export function requireApiAccess(req: express.Request, res: express.Response, next: express.NextFunction) {
-  const expected = process.env.ACCESS_TOKEN;
+  const problem = productionAccessProblem();
+  if (problem) {
+    return res.status(503).json({ success: false, error: problem });
+  }
+  const expected = process.env.ACCESS_TOKEN?.trim();
   if (!expected) {
     return next();
   }
