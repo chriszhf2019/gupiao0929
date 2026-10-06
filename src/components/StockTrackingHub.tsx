@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { TrackedStockItem, TrackStatus, StockData } from '../types/stock';
-import { STATUS_MAP, loadTrackedStocks, saveTrackedStocks, createTrackedStockFromStockData } from '../data/trackingData';
+import { STATUS_MAP, createTrackedStockFromStockData } from '../data/trackingData';
+import { usePortfolio } from '../context/PortfolioContext';
+import { VaultPasswordGate } from './portfolio/VaultPasswordGate';
 import { PRESET_STOCKS } from '../data/presetStocks';
 import { stockService } from '../services/stockService';
 import {
@@ -38,12 +40,16 @@ export const StockTrackingHub: React.FC<StockTrackingHubProps> = ({
   onNavigateToFiveStep,
   onNavigateToDeepExplore,
 }) => {
-  const [trackedList, setTrackedList] = useState<TrackedStockItem[]>(() => loadTrackedStocks());
-  const [selectedSymbol, setSelectedSymbol] = useState<string>(() => {
-    const list = loadTrackedStocks();
-    const found = list.find((i) => i.symbol === currentSymbol);
-    return found ? found.symbol : (list[0]?.symbol || '600519');
-  });
+  const {
+    status,
+    trackedStocks: trackedList,
+    setTrackedStocks,
+    error: vaultError,
+    unlock,
+    setup,
+    reset,
+  } = usePortfolio();
+  const [selectedSymbol, setSelectedSymbol] = useState<string>(currentSymbol);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [addSearchInput, setAddSearchInput] = useState('');
@@ -86,8 +92,7 @@ export const StockTrackingHub: React.FC<StockTrackingHubProps> = ({
   const currency = activeTracked?.currency || 'CNY';
 
   const handleUpdateList = (updated: TrackedStockItem[]) => {
-    setTrackedList(updated);
-    saveTrackedStocks(updated);
+    setTrackedStocks(updated);
   };
 
   const handleStatusChange = (symbol: string, newStatus: TrackStatus) => {
@@ -244,6 +249,10 @@ export const StockTrackingHub: React.FC<StockTrackingHubProps> = ({
     const p = PRESET_STOCKS[i.symbol]?.currentPrice || i.currentPrice;
     return p <= i.targetStopLossPrice || i.trackStatus === 'high_alert';
   }).length;
+
+  if (status !== 'ready') {
+    return <VaultPasswordGate status={status} error={vaultError} onUnlock={unlock} onSetup={setup} onReset={reset} />;
+  }
 
   return (
     <div className="space-y-6">

@@ -3,6 +3,8 @@ import { StockData, PeerRecommendationRecord } from '../types/stock';
 import { auditPeerRecommendation } from '../utils/peerRecommendationAuditor';
 import { PRESET_STOCKS } from '../data/presetStocks';
 import { stockService } from '../services/stockService';
+import { usePortfolio } from '../context/PortfolioContext';
+import { VaultPasswordGate } from './portfolio/VaultPasswordGate';
 import {
   Users,
   ShieldAlert,
@@ -32,8 +34,6 @@ interface PeerRecommendationValidatorModalProps {
   onSelectStock: (symbol: string) => void;
 }
 
-const STORAGE_KEY = 'zane_peer_recommendations_history_v1';
-
 export const PeerRecommendationValidatorModal: React.FC<PeerRecommendationValidatorModalProps> = ({
   isOpen,
   onClose,
@@ -52,60 +52,15 @@ export const PeerRecommendationValidatorModal: React.FC<PeerRecommendationValida
   const [stockLoading, setStockLoading] = useState(false);
   const [priceMap, setPriceMap] = useState<Record<string, number>>({});
 
-  // 历史验真记录 (持久化)
-  const [historyRecords, setHistoryRecords] = useState<PeerRecommendationRecord[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) return JSON.parse(saved);
-    } catch {
-      // ignore
-    }
-    // 默认内置两条真实样例，供新手直观体验
-    return [
-      {
-        id: 'mock_hist_1',
-        recommenderName: '雪球大V @成长猎手',
-        sourceChannel: 'kol',
-        symbol: '300750',
-        stockName: '宁德时代',
-        recommendedPrice: 245.0,
-        recommendedDate: '2026-08-10',
-        recommendedReason: '储能出海暴增，三季度利润超预期',
-        userAttitude: 'neutral',
-        auditVerdict: 'wait_pullback',
-        verdictTitle: '逻辑部分成立 · 建议耐心等回调企稳',
-        verdictScore: 65,
-        verdictExplanation: '基本面扎实，但前期已有一定涨幅，追高盈亏比一般。',
-        redFlags: ['处于阶段性阻力位附近'],
-        alignmentChecks: [],
-      },
-      {
-        id: 'mock_hist_2',
-        recommenderName: '老李 (大学同学)',
-        sourceChannel: 'friend',
-        symbol: '002594',
-        stockName: '比亚迪',
-        recommendedPrice: 260.0,
-        recommendedDate: '2026-07-15',
-        recommendedReason: '高端仰望销量大增，智驾算法全量推送',
-        userAttitude: 'interested',
-        auditVerdict: 'resonance_buy',
-        verdictTitle: '高胜率共振 · 对方逻辑与内在价值吻合',
-        verdictScore: 88,
-        verdictExplanation: '护城河极宽，现金流强劲，与内在价值共振。',
-        redFlags: [],
-        alignmentChecks: [],
-      },
-    ];
-  });
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(historyRecords));
-    } catch {
-      // ignore
-    }
-  }, [historyRecords]);
+  const {
+    status,
+    peerHistory: historyRecords,
+    setPeerHistory: setHistoryRecords,
+    error: vaultError,
+    unlock,
+    setup,
+    reset,
+  } = usePortfolio();
 
   // 当外部选股改变时同步
   useEffect(() => {
@@ -155,6 +110,17 @@ export const PeerRecommendationValidatorModal: React.FC<PeerRecommendationValida
   }, [isOpen, activeTab, historyRecords]);
 
   if (!isOpen) return null;
+
+  if (status !== 'ready') {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
+        <div>
+          <button onClick={onClose} className="mb-2 text-xs text-white">关闭</button>
+          <VaultPasswordGate status={status} error={vaultError} onUnlock={unlock} onSetup={setup} onReset={reset} />
+        </div>
+      </div>
+    );
+  }
 
   const activeStockData = activeStock || PRESET_STOCKS[symbol] || currentStock;
   const auditResult = auditPeerRecommendation({

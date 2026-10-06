@@ -89,7 +89,8 @@ npm test        # vitest 单元测试（36 项：排雷/估值/回测/审计器/
 ---
 
 ## 🔒 安全说明
-- 组合持仓用 PBKDF2(12万迭代) + AES-256-GCM 加密存本地，密码不落盘
+- 组合持仓、决策档案、跟踪列表、买点雷达和荐股记录共用一把密码，PBKDF2(12万迭代) + AES-256-GCM 加密存本地，密码不落盘
+- 工作台地址形如 `/five-step/600519`、`/tracking/600519`，刷新后停在当前页面和代码
 - 所有 /api 支持 Bearer 门禁 + 滑动窗口限流
 - `.env` 已在 .gitignore；**请勿把真实 key 提交/分享**
 
@@ -102,7 +103,8 @@ npm test        # vitest 单元测试（36 项：排雷/估值/回测/审计器/
 
 ## 📦 目录结构（关键）
 ```
-server.ts                    # Express 后端（行情/财报/股东/K线/基金/北向/回测基准/AI 代理）
+server.ts                    # Express 入口（鉴权、限流、静态资源）
+server/routes                # 行情、个股、机构持仓、AI、指数基金路由
 scripts/akshare_server.py    # Python 机构持仓数据服务（公募/社保，可独立运行）
 src/
   components/                # 五大工作台 + 弹窗工具

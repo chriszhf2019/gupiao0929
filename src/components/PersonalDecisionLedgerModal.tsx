@@ -6,10 +6,10 @@ import {
   ExitReasonType,
   StockData,
 } from '../types/stock';
-import { DEFAULT_INVESTMENT_DECISIONS } from '../data/defaultDecisions';
 import { PRESET_STOCKS } from '../data/presetStocks';
 import { calculateBeneishAndAltman } from '../utils/institutionalForensics';
 import { usePortfolio } from '../context/PortfolioContext';
+import { VaultPasswordGate } from './portfolio/VaultPasswordGate';
 import { computeTotalCapitalCny } from '../services/portfolioService';
 import {
   BookOpenCheck,
@@ -45,8 +45,6 @@ interface PersonalDecisionLedgerModalProps {
   initialNewDecision?: boolean;
 }
 
-const STORAGE_KEY = 'zane_personal_investment_decisions_v2';
-
 export const PersonalDecisionLedgerModal: React.FC<PersonalDecisionLedgerModalProps> = ({
   isOpen,
   onClose,
@@ -54,15 +52,6 @@ export const PersonalDecisionLedgerModal: React.FC<PersonalDecisionLedgerModalPr
   onSelectStock,
   initialNewDecision = false,
 }) => {
-  const [decisions, setDecisions] = useState<PersonalInvestmentDecision[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) return JSON.parse(saved);
-    } catch {
-      // ignore
-    }
-    return DEFAULT_INVESTMENT_DECISIONS;
-  });
 
   const [activeTab, setActiveTab] = useState<'active' | 'closed' | 'editor'>('active');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -94,20 +83,21 @@ export const PersonalDecisionLedgerModal: React.FC<PersonalDecisionLedgerModalPr
   const [formHoldingPeriod, setFormHoldingPeriod] = useState<string>('6-12个月');
 
   // 读取真实组合总资本（组合已解锁时），用于默认总资本与仓位占比计算，替代硬编码 30 万
-  const { status: portfolioStatus, accounts, transactions } = usePortfolio();
+  const {
+    status: portfolioStatus,
+    accounts,
+    transactions,
+    decisions,
+    setDecisions,
+    error: vaultError,
+    unlock,
+    setup,
+    reset,
+  } = usePortfolio();
   const realTotalCapital = useMemo(
     () => (portfolioStatus === 'ready' ? computeTotalCapitalCny(accounts, transactions) : 0),
     [portfolioStatus, accounts, transactions]
   );
-
-  // 持久化到 LocalStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(decisions));
-    } catch {
-      // ignore
-    }
-  }, [decisions]);
 
   // 当外部唤起新建时
   useEffect(() => {
@@ -317,6 +307,17 @@ export const PersonalDecisionLedgerModal: React.FC<PersonalDecisionLedgerModalPr
   };
 
   if (!isOpen) return null;
+
+  if (portfolioStatus !== 'ready') {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/70 backdrop-blur-xs">
+        <div className="relative">
+          <button onClick={onClose} className="absolute -top-2 right-2 text-xs text-white">关闭</button>
+          <VaultPasswordGate status={portfolioStatus} error={vaultError} onUnlock={unlock} onSetup={setup} onReset={reset} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/70 backdrop-blur-xs animate-fade-in">
