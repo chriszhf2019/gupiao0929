@@ -31,8 +31,46 @@ interface ScreenerItem {
   isSt?: boolean;
 }
 
+export type MarketPhase = 'bull_early' | 'bull_late' | 'bear_oscillation';
+
+export interface MarketPhaseConfig {
+  label: string;
+  desc: string;
+  growthWeight: number;
+  valuationWeight: number;
+  dividendWeight: number;
+}
+
+export const MARKET_PHASE_CONFIGS: Record<MarketPhase, MarketPhaseConfig> = {
+  bull_early: {
+    label: '牛市初期 (估值扩张期)',
+    desc: '策略重在捕捉估值超跌修复，权重：估值 50% | 盈利 25% | 股息 25%',
+    growthWeight: 0.25,
+    valuationWeight: 0.50,
+    dividendWeight: 0.25,
+  },
+  bull_late: {
+    label: '牛市后期 (盈利兑现期)',
+    desc: '策略重在基本面盈利高增速与ROE，权重：盈利 60% | 估值 20% | 股息 20%',
+    growthWeight: 0.60,
+    valuationWeight: 0.20,
+    dividendWeight: 0.20,
+  },
+  bear_oscillation: {
+    label: '熊市/震荡市 (防守分红期)',
+    desc: '策略重在高股息安全垫与低估值，权重：股息 50% | 盈利 25% | 估值 25%',
+    growthWeight: 0.25,
+    valuationWeight: 0.25,
+    dividendWeight: 0.50,
+  },
+};
+
 interface EnrichedItem extends ScreenerItem {
-  valueSignal: number; // 格林布拉特"魔法公式"价值信号：盈利收益率 + ROE（越高越具价值+质量）
+  valueSignal: number; // 格林布拉特"魔法公式"价值信号
+  growthScore: number;
+  valuationScore: number;
+  dividendScore: number;
+  score3D: number; // 三维综合得分
 }
 
 interface ScreenerResponse {
@@ -51,7 +89,7 @@ interface StockScreenerViewProps {
   onClearPreset?: () => void;
 }
 
-type SortKey = 'price' | 'changePercent' | 'pe' | 'pb' | 'roe' | 'marketCapYi' | 'turnoverRate' | 'valueSignal';
+type SortKey = 'price' | 'changePercent' | 'pe' | 'pb' | 'roe' | 'marketCapYi' | 'turnoverRate' | 'valueSignal' | 'score3D';
 
 const PAGE_SIZE = 20;
 
@@ -72,11 +110,41 @@ function fmtNum(n: number, digits = 2): string {
   return n.toFixed(digits);
 }
 
-// 格林布拉特"魔法公式"价值信号：盈利收益率(1/PE) + ROE，越高越具"便宜+优质"属性
 function valueSignalOf(i: ScreenerItem): number {
-  const earningsYield = i.pe > 0 ? 100 / i.pe : 0; // 1/PE 的百分数近似
+  const earningsYield = i.pe > 0 ? 100 / i.pe : 0;
   const roe = i.roe > 0 ? i.roe : 0;
   return Number((earningsYield + roe).toFixed(1));
+}
+
+function compute3DScores(i: ScreenerItem, phase: MarketPhase) {
+  // 1. 盈利得分 (0 - 100): 以 ROE 15% 标杆对标
+  const growthScore = Number(Math.min(100, Math.max(0, (i.roe / 25) * 100)).toFixed(1));
+
+  // 2. 估值得分 (0 - 100): 低 PE 合理且非负、剔除 PE>100
+  let val = 50;
+  if (i.pe > 0 && i.pe <= 100) {
+    if (i.pe <= 15) val = 95 - (i.pe - 5) * 2;
+    else if (i.pe <= 30) val = 75 - (i.pe - 15) * 1.5;
+    else val = 50 - (i.pe - 30) * 0.5;
+  } else if (i.pe > 100) {
+    val = 15;
+  }
+  const valuationScore = Number(Math.max(10, Math.min(99, val)).toFixed(1));
+
+  // 3. 股息能力得分 (0 - 100): 基于 ROE/PE 的派息潜能预估
+  const estYield = i.pe > 0 ? Math.min(8.0, (i.roe / i.pe) * 1.8) : 0;
+  const divScore = Math.min(100, Math.max(10, estYield * 18 + (i.roe >= 15 ? 15 : 0)));
+  const dividendScore = Number(divScore.toFixed(1));
+
+  // 4. 结合当前市场阶段动态加权
+  const cfg = MARKET_PHASE_CONFIGS[phase];
+  const score3D = Number((
+    growthScore * cfg.growthWeight +
+    valuationScore * cfg.valuationWeight +
+    dividendScore * cfg.dividendWeight
+  ).toFixed(1));
+
+  return { growthScore, valuationScore, dividendScore, score3D };
 }
 
 export const StockScreenerView: React.FC<StockScreenerViewProps> = ({ currentSymbol, onSelectStock, presetSymbols, onClearPreset }) => {
@@ -97,6 +165,7 @@ export const StockScreenerView: React.FC<StockScreenerViewProps> = ({ currentSym
   const [page, setPage] = useState(1);
   const [showFilters, setShowFilters] = useState(false);
   const [excludeSt, setExcludeSt] = useState(true);
+  const [marketPhase, setMarketPhase] = useState<MarketPhase>('bear_oscillation');
 
   const load = async () => {
     setLoading(true);
@@ -150,7 +219,14 @@ export const StockScreenerView: React.FC<StockScreenerViewProps> = ({ currentSym
         if (priceMax && i.price > Number(priceMax)) return false;
         return true;
       })
-      .map((i) => ({ ...i, valueSignal: valueSignalOf(i) }));
+      .map((i) => {
+        const scores = compute3DScores(i, marketPhase);
+        return {
+          ...i,
+          valueSignal: valueSignalOf(i),
+          ...scores,
+        };
+      });
 
     const dir = sortDir === 'asc' ? 1 : -1;
     return list.sort((a, b) => {
@@ -158,7 +234,7 @@ export const StockScreenerView: React.FC<StockScreenerViewProps> = ({ currentSym
       const vb = b[sortKey] ?? 0;
       return (va - vb) * dir;
     });
-  }, [items, keyword, industry, peMin, peMax, roeMin, priceMin, priceMax, sortKey, sortDir, presetSymbols, excludeSt]);
+  }, [items, keyword, industry, peMin, peMax, roeMin, priceMin, priceMax, sortKey, sortDir, presetSymbols, excludeSt, marketPhase]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -206,8 +282,19 @@ export const StockScreenerView: React.FC<StockScreenerViewProps> = ({ currentSym
     setPage(1);
   };
 
+  // 一键应用"普通人三维选股模型"精选门槛：ROE≥12%、PE 5~35、排雷ST，按三维得分降序
+  const apply3DStrategyPreset = () => {
+    setPeMin('5');
+    setPeMax('35');
+    setRoeMin('12');
+    setExcludeSt(true);
+    setSortKey('score3D');
+    setSortDir('desc');
+    setPage(1);
+  };
+
   const exportCsv = () => {
-    const header = ['代码', '名称', '市场', '行业', '最新价', '涨跌幅%', 'PE', 'PB', 'ROE%', '总市值(亿)', '换手率%', '价值信号'];
+    const header = ['代码', '名称', '市场', '行业', '最新价', '涨跌幅%', 'PE', 'PB', 'ROE%', '三维综合分', '盈利得分', '估值得分', '股息得分', '总市值(亿)', '换手率%', '价值信号'];
     const rows = filtered.map((i) => [
       i.code,
       i.name,
@@ -218,6 +305,10 @@ export const StockScreenerView: React.FC<StockScreenerViewProps> = ({ currentSym
       i.pe > 0 ? i.pe.toFixed(1) : '',
       i.pb > 0 ? i.pb.toFixed(2) : '',
       i.roe > 0 ? i.roe.toFixed(1) : '',
+      i.score3D.toFixed(1),
+      i.growthScore.toFixed(1),
+      i.valuationScore.toFixed(1),
+      i.dividendScore.toFixed(1),
       i.marketCapYi > 0 ? i.marketCapYi.toFixed(0) : '',
       i.turnoverRate.toFixed(2),
       i.valueSignal.toFixed(1),
@@ -303,6 +394,14 @@ export const StockScreenerView: React.FC<StockScreenerViewProps> = ({ currentSym
             <span>筛选</span>
           </button>
           <button
+            onClick={apply3DStrategyPreset}
+            className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-[#3E6F73] hover:bg-[#325a5d] text-white text-xs font-semibold shadow-xs cursor-pointer"
+            title="一键筛选普通人三维选股模型（盈利增长+估值安全+股息分红）"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+            <span>三维选股模型</span>
+          </button>
+          <button
             onClick={applyValueRanking}
             className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-[#4A7C6F]/10 hover:bg-[#4A7C6F]/20 border border-[#4A7C6F]/30 text-[#376156] dark:text-[#76B4B9] text-xs font-semibold cursor-pointer"
             title="格林布拉特魔法公式：盈利收益率 + ROE 综合排序，寻找'便宜且优质'的标的"
@@ -327,6 +426,65 @@ export const StockScreenerView: React.FC<StockScreenerViewProps> = ({ currentSym
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             <span>刷新</span>
           </button>
+        </div>
+      </div>
+
+      {/* 普通人三维选股模型与市场阶段动态加权卡片 */}
+      <div className="bg-gradient-to-br from-[#1F3437] to-[#2D4A4E] text-white p-5 rounded-2xl shadow-sm space-y-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center space-x-2 text-xs text-[#76B4B9] font-bold uppercase tracking-wider">
+              <Sparkles className="w-4 h-4 text-amber-300" />
+              <span>股价底层公式「股价 = EPS × PE」三维收益解构选股模型</span>
+            </div>
+            <h3 className="text-base font-serif font-bold text-white flex items-center space-x-2">
+              <span>普通人可落地的三大赚钱维度：盈利增长 + 估值安全 + 股息收益</span>
+            </h3>
+            <p className="text-xs text-[#A8C4C7] max-w-3xl">
+              {MARKET_PHASE_CONFIGS[marketPhase].desc}。点击右侧动态切换 A 股牛熊与震荡市场阶段：
+            </p>
+          </div>
+
+          <div className="flex items-center space-x-2 bg-[#141A1B]/60 p-1.5 rounded-xl border border-[#3E6F73]/40">
+            {(Object.keys(MARKET_PHASE_CONFIGS) as MarketPhase[]).map((phaseKey) => {
+              const cfg = MARKET_PHASE_CONFIGS[phaseKey];
+              const isSelected = marketPhase === phaseKey;
+              return (
+                <button
+                  key={phaseKey}
+                  onClick={() => {
+                    setMarketPhase(phaseKey);
+                    setSortKey('score3D');
+                    setSortDir('desc');
+                    setPage(1);
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    isSelected
+                      ? 'bg-[#3E6F73] text-white shadow-xs'
+                      : 'text-[#9BB2B4] hover:text-white hover:bg-white/5'
+                  }`}
+                  title={cfg.desc}
+                >
+                  {cfg.label.split(' ')[0]}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-white/10 text-xs">
+          <div className="bg-white/5 p-2.5 rounded-xl border border-white/10">
+            <div className="font-bold text-[#76B4B9] mb-1">1. 盈利增长维度 (权重 {(MARKET_PHASE_CONFIGS[marketPhase].growthWeight * 100).toFixed(0)}%)</div>
+            <div className="text-[11px] text-gray-300">净利润增速≥15%、连续 ROE≥15%、毛利率≥20%、经营现金流≥80%净利润</div>
+          </div>
+          <div className="bg-white/5 p-2.5 rounded-xl border border-white/10">
+            <div className="font-bold text-[#76B4B9] mb-1">2. 估值安全维度 (权重 {(MARKET_PHASE_CONFIGS[marketPhase].valuationWeight * 100).toFixed(0)}%)</div>
+            <div className="text-[11px] text-gray-300">PE历史分位≤30%、PEG≤1、行业估值相对低20%+、硬剔除PE&gt;100泡沫</div>
+          </div>
+          <div className="bg-white/5 p-2.5 rounded-xl border border-white/10">
+            <div className="font-bold text-[#76B4B9] mb-1">3. 股息收益维度 (权重 {(MARKET_PHASE_CONFIGS[marketPhase].dividendWeight * 100).toFixed(0)}%)</div>
+            <div className="text-[11px] text-gray-300">股息率≥2.5%、分红率≥30%、连续分红≥5年、现金流覆盖1.5倍分红</div>
+          </div>
         </div>
       </div>
 
@@ -430,6 +588,7 @@ export const StockScreenerView: React.FC<StockScreenerViewProps> = ({ currentSym
                     <SortHeader label="PE" k="pe" className="text-right" />
                     <SortHeader label="PB" k="pb" className="text-right" />
                     <SortHeader label="ROE" k="roe" className="text-right" />
+                    <SortHeader label="三维得分" k="score3D" className="text-right" />
                     <SortHeader label="价值信号" k="valueSignal" className="text-right" />
                     <SortHeader label="总市值" k="marketCapYi" className="text-right" />
                     <SortHeader label="换手率" k="turnoverRate" className="text-right hidden lg:table-cell" />
@@ -466,6 +625,14 @@ export const StockScreenerView: React.FC<StockScreenerViewProps> = ({ currentSym
                         <td className="py-2.5 text-right font-mono text-[#576F73] dark:text-[#9BB2B4]">{i.pe > 0 ? fmtNum(i.pe, 1) : '--'}</td>
                         <td className="py-2.5 text-right font-mono text-[#576F73] dark:text-[#9BB2B4]">{i.pb > 0 ? fmtNum(i.pb) : '--'}</td>
                         <td className="py-2.5 text-right font-mono text-[#576F73] dark:text-[#9BB2B4]">{i.roe > 0 ? `${fmtNum(i.roe, 1)}%` : '--'}</td>
+                        <td className="py-2.5 text-right font-mono">
+                          <div className="inline-flex flex-col items-end">
+                            <span className="text-amber-700 dark:text-amber-400 font-extrabold text-xs">{fmtNum(i.score3D, 1)}分</span>
+                            <span className="text-[9px] text-[#7A9194] scale-90 origin-right">
+                              增{i.growthScore.toFixed(0)}/估{i.valuationScore.toFixed(0)}/息{i.dividendScore.toFixed(0)}
+                            </span>
+                          </div>
+                        </td>
                         <td className="py-2.5 text-right font-mono font-bold text-[#2B5458] dark:text-[#76B4B9]">
                           {i.pe > 0 || i.roe > 0 ? fmtNum(i.valueSignal, 1) : '--'}
                         </td>

@@ -1521,7 +1521,13 @@ app.post("/api/generate-strategy", aiRateLimit, async (req, res) => {
     let period: any = "长线复利 (1-3年)";
     let risk: any = "中等平衡";
 
-    if (promptText.includes("股息") || promptText.includes("分红") || promptText.includes("央企") || promptText.includes("收息")) {
+    if (promptText.includes("三维") || promptText.includes("三种钱") || promptText.includes("普通人") || promptText.includes("股息") && promptText.includes("增速")) {
+      styleTag = "价值白马";
+      strategyName = "普通人三维选股模型：盈利增长 + 估值安全 + 股息收益";
+      philosophy = "基于「股价 = EPS × PE」底层公式，将收益源拆解为盈利成长 (40%)、估值修复 (30%) 与股息分红 (30%) 三大安全垫，结合 A 股牛熊周期动态切换权重。";
+      period = "长线复利 (1-3年)";
+      risk = "中等平衡";
+    } else if (promptText.includes("股息") || promptText.includes("分红") || promptText.includes("央企") || promptText.includes("收息")) {
       styleTag = "高股息红利";
       strategyName = "大类资产防御：高股息特估与现金流奶牛策略";
       philosophy = "在宏观利率下行期，筛选股息率>4%、资产负债率健康、自由现金流覆盖股息支付的优质央国企与公用事业龙头。";
